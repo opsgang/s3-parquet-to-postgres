@@ -1,0 +1,13 @@
+db:
+  table_name: delivery_contents_v4
+  conn_str: "host=127.0.0.1 password=postgres user=postgres dbname=warehouse"
+s3:
+  bucket: "skilling-customer-io-s3-parquet-dumps"
+  download_batch_size: 2
+  downloads_dir: "out"
+parquet:
+  desired_fields:
+    - delivery_id
+    - body
+work_lists:
+  dir: "work"

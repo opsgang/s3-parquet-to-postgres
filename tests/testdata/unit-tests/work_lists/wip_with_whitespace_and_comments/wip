@@ -1,0 +1,8 @@
+  
+# a comment below an empty line full of whitespace
+ITEM_A
+    # some other comment with leading whitespace
+ITEM_B
+
+# ^^^ an empty line, and also this comment
+

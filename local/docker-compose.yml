@@ -1,0 +1,36 @@
+# vim: et sr sw=2 ts=2 smartindent:
+name: "s3-parquet-to-postgres"
+services:
+  db:
+    image: postgres:16.1
+    networks:
+      - parquet_to_pg
+    ports:
+      - "5432:5432"
+    command: postgres -c fsync=off
+    env_file: env.db
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - ./docker-entrypoint-initdb.d:/docker-entrypoint-initdb.d:ro
+#      - ./pgdata:/var/lib/postgresql/data # uncomment to preserve between runs
+  localstack:
+    image: localstack/localstack
+    ports:
+      - "4566:4566"
+    healthcheck:
+      test: >-
+        curl -sf localhost:4566/_localstack/init/ready
+        | grep -q '"completed":[\ *]true'
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    env_file: env.localstack
+    volumes:
+      - ./localstack/etc/localstack/init/ready.d:/etc/localstack/init/ready.d:ro
+      - ./localstack/bucket_data:/var/tmp/bucket_data:ro
+networks:
+  parquet_to_pg:
