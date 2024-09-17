@@ -14,7 +14,6 @@ fn get_dirpath(path_str: &str) -> Result<Option<String>> {
 
     // Check if the path ends with a trailing slash
     if path_str.ends_with('/') {
-        // anyhow provides simple custom errors with bail! macro, if panic is sufficient
         bail!("the object path looks like a dir: {}", path_str);
     }
 
@@ -126,4 +125,294 @@ pub async fn get(
 pub fn delete(filename: String) -> Result<()> {
     remove_file(filename)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use anyhow::{bail, Result};
+    use assert_fs::{fixture::TempDir, prelude::*};
+    use const_format::formatcp;
+    use once_cell::sync::Lazy;
+    use std::env;
+    use tokio::fs;
+    use tokio::io::AsyncReadExt;
+    use tokio::sync::Mutex;
+
+    static ENV_MUTEX: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+
+    static SRC_PARQUET_DIR: &str = formatcp!(
+        "{}/{}",
+        env!("CARGO_MANIFEST_DIR"),
+        "tests/testdata/unit-tests/parquet_ops"
+    );
+
+    macro_rules! vec_stringify {
+        ($($x:expr),*) => (vec![$($x.to_string()),*]);
+    }
+
+    fn set_good_aws_vars() {
+        unset_aws_env_vars(); // remove any inherited vars
+        env::set_var("AWS_ACCESS_KEY_ID", "test");
+        env::set_var("AWS_SECRET_ACCESS_KEY", "test");
+        env::set_var("AWS_DEFAULT_REGION", "us-west-1");
+        env::set_var("AWS_ENDPOINT_URL", "http://127.0.0.1:4566");
+    }
+
+    fn unset_aws_env_vars() {
+        let aws_keys: Vec<String> = env::vars()
+            .filter(|(key, _)| key.starts_with("AWS_"))
+            .map(|(key, _)| key)
+            .collect();
+
+        for key in aws_keys {
+            env::remove_var(key);
+        }
+    }
+
+    fn restore_env(original_env: HashMap<String, String>) {
+        for (key, _) in env::vars() {
+            env::remove_var(key);
+        }
+
+        for (key, value) in original_env {
+            env::set_var(key, value);
+        }
+    }
+
+    async fn get_downloaded_and_src_file_contents(
+        src_file_path: String,
+        downloaded_file_path: String,
+    ) -> Result<(Vec<u8>, Vec<u8>)> {
+        let mut src_file = fs::File::open(src_file_path).await?;
+        let mut src_file_contents = Vec::new();
+        src_file.read_to_end(&mut src_file_contents).await?;
+
+        // Read the contents of the second file asynchronously
+        let mut downloaded_file = fs::File::open(downloaded_file_path).await?;
+        let mut downloaded_file_contents = Vec::new();
+        downloaded_file
+            .read_to_end(&mut downloaded_file_contents)
+            .await?;
+
+        Ok((src_file_contents, downloaded_file_contents))
+    }
+
+    // fn get_dirpath(path_str: &str) -> Result<Option<String>>
+    #[test]
+    fn test_get_dirpath_abs_path_to_file_returns_abs_dir_path() -> Result<()> {
+        let path = "/some/path/to/file.parquet";
+
+        let dirpath_result = get_dirpath(path);
+
+        assert!(
+            dirpath_result.is_ok(),
+            "should return dirpath to file.parquet, with no trailing slash",
+        );
+
+        let Some(v) = dirpath_result.unwrap() else {
+            bail!("dirpath_result should unwrap without issue")
+        };
+        assert_eq!(v, "/some/path/to");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_dirpath_rel_path_to_file_returns_rel_dir_path() -> Result<()> {
+        let path = "some/path/to/file.parquet";
+
+        let dirpath_result = get_dirpath(path);
+
+        assert!(
+            dirpath_result.is_ok(),
+            "should return dirpath to file.parquet, with no trailing slash",
+        );
+
+        let Some(v) = dirpath_result.unwrap() else {
+            bail!("dirpath_result should unwrap without issue")
+        };
+        assert_eq!(v, "some/path/to");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_dirpath_trailing_slash_will_err() -> Result<()> {
+        let path = "some/path/to/dir/";
+
+        let dirpath_result = get_dirpath(path);
+
+        assert!(
+            dirpath_result.is_err(),
+            "should fail due to input path trailing slash"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_dirpath_rel_filename_no_parent_dirs() -> Result<()> {
+        let path = "parquet.file";
+
+        let dirpath_result = get_dirpath(path);
+
+        assert!(
+            dirpath_result.is_ok(),
+            "should return None as no parent dirs",
+        );
+
+        let v = dirpath_result.unwrap();
+        assert_eq!(v, None);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_dirpath_abs_filename_in_root_dir() -> Result<()> {
+        let path = "/parquet.file";
+
+        let dirpath_result = get_dirpath(path);
+
+        assert!(
+            dirpath_result.is_ok(),
+            "should return None as no parent dirs to create (only root dir)",
+        );
+
+        let v = dirpath_result.unwrap();
+        assert_eq!(v, None);
+
+        Ok(())
+    }
+
+    // NOTE: the paths being passed to get_dirpath() are meant to be
+    // S3 object "keys" (the path-like id in an s3 bucket for an object).
+    // The . and .. are meaningless in an S3 key context
+    // so this tool doesn't care about handling them in some special way.
+    // This test is here, just to remind anyone else of this fact.
+    #[test]
+    fn test_get_dirpath_rel_unix_dots() -> Result<()> {
+        let path = "./../path/to/parquet.file";
+
+        let dirpath_result = get_dirpath(path);
+
+        assert!(
+            dirpath_result.is_ok(),
+            "should return dirpath to file.parquet, with no trailing slash",
+        );
+
+        let Some(v) = dirpath_result.unwrap() else {
+            bail!("dirpath_result should unwrap without issue")
+        };
+        assert_eq!(v, "./../path/to");
+
+        Ok(())
+    }
+
+    // pub async fn get(bucket_name: String, s3_keys: Vec<String>, output_dir: String,) -> Result<HashMap<String, String>>
+    #[tokio::test]
+    async fn test_bad_aws_creds() -> Result<()> {
+        let _env_lock = ENV_MUTEX.lock().await;
+        let original_env: HashMap<String, String> = env::vars().collect();
+        unset_aws_env_vars();
+
+        // set up aws env vars for localstack
+        let res = get(
+            String::from("no-such-bucket"),
+            vec_stringify!["order_001.parquet", "order_002.parquet"],
+            ".".to_string(),
+        )
+        .await;
+
+        restore_env(original_env);
+
+        assert!(res.is_err(), "aws api should fail as no valid creds");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_get_unknown_bucket() -> Result<()> {
+        let _env_lock = ENV_MUTEX.lock().await;
+        let original_env: HashMap<String, String> = env::vars().collect();
+        set_good_aws_vars();
+
+        // set up aws env vars for localstack
+        let res = get(
+            String::from("no-such-bucket"),
+            vec_stringify!["order_001.parquet", "order_002.parquet"],
+            ".".to_string(),
+        )
+        .await;
+
+        restore_env(original_env);
+
+        assert!(res.is_err(), "aws api should fail as no such bucket");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_get_unknown_key() -> Result<()> {
+        let _env_lock = ENV_MUTEX.lock().await;
+        let original_env: HashMap<String, String> = env::vars().collect();
+        set_good_aws_vars();
+
+        // set up aws env vars for localstack
+        let res = get(
+            String::from("customer-orders-parquet"),
+            vec_stringify!["not-a-real-key", "order_01.parquet"], // [not real, real] key
+            ".".to_string(),
+        )
+        .await;
+
+        restore_env(original_env);
+
+        assert!(res.is_err(), "aws api should fail as no such key");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_get_happy_path_files_at_bucket_root() -> Result<()> {
+        // set up aws env vars for localstack
+        let _env_lock = ENV_MUTEX.lock().await;
+        let original_env: HashMap<String, String> = env::vars().collect();
+        set_good_aws_vars();
+
+        let tmp_dir = TempDir::new().unwrap();
+        tmp_dir
+            .copy_from(SRC_PARQUET_DIR, &["order_*.parquet"])
+            .unwrap();
+        let tmp_dir_path = format!("{}", tmp_dir.path().display());
+        let res = get(
+            String::from("customer-orders-parquet"),
+            vec_stringify!["order_00.parquet", "order_01.parquet"], // [real, real] key
+            tmp_dir_path.clone(),
+        )
+        .await;
+
+        restore_env(original_env);
+
+        assert!(
+            res.is_ok(),
+            "should download order_00 and order_01 parquet files"
+        );
+
+        let my_map = res.unwrap();
+
+        for (s3_key, downloaded_file) in &my_map {
+            let (src_contents, downloaded_contents) = get_downloaded_and_src_file_contents(
+                format!("{}/{}", SRC_PARQUET_DIR, s3_key),
+                downloaded_file.to_string(),
+            )
+            .await
+            .unwrap();
+
+            assert_eq!(src_contents, downloaded_contents,);
+        }
+
+        tmp_dir.close().unwrap(); // can be deleted as read what we need
+        Ok(())
+    }
 }

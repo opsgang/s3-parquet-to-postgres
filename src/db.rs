@@ -206,17 +206,17 @@ mod tests {
     use tokio_postgres::types::Type as PgType;
     use tokio_postgres::Client; // used so data may be verified according to the pg data type
 
+    macro_rules! vec_stringify {
+        ($($x:expr),*) => (vec![$($x.to_string()),*]);
+    }
+
     static PARQUET_SRC_DIR: &str = formatcp!(
         "{}/{}",
         env!("CARGO_MANIFEST_DIR"),
         "tests/testdata/unit-tests/parquet_ops"
     );
 
-    static GOOD_DB_CONN_STR: &str = "host=127.0.0.1 user=postgres password=postgres dbname=testing";
-
-    macro_rules! vec_stringify {
-        ($($x:expr),*) => (vec![$($x.to_string()),*]);
-    }
+    const GOOD_DB_CONN_STR: &str = "host=127.0.0.1 user=postgres password=postgres dbname=testing";
 
     #[allow(dead_code)]
     fn type_of<T>(_: T) -> &'static str {

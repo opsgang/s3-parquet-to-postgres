@@ -77,7 +77,7 @@ mod tests {
             config.db.conn_str,
             "host=127.0.0.1 password=postgres user=postgres dbname=warehouse"
         );
-        assert_eq!(config.s3.bucket, "skilling-customer-io-s3-parquet-dumps");
+        assert_eq!(config.s3.bucket, "deliveries-parquet");
         assert_eq!(config.s3.download_batch_size, 2);
         assert_eq!(config.s3.downloads_dir, "out");
         assert_eq!(

@@ -2280,6 +2280,7 @@ dependencies = [
  "env_logger",
  "futures",
  "log",
+ "once_cell",
  "parquet",
  "pin-utils",
  "serde",
