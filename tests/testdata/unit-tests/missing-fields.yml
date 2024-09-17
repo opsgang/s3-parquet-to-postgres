@@ -1,6 +1,6 @@
 db:
 s3:
-  bucket: "skilling-customer-io-s3-parquet-dumps"
+  bucket: "customer-orders-parquet"
   download_batch_size: 2
 parquet:
   desired_fields:
