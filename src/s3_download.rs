@@ -131,7 +131,7 @@ pub fn delete(filename: String) -> Result<()> {
 mod tests {
     use super::*;
     use anyhow::{bail, Result};
-    use assert_fs::{fixture::TempDir, prelude::*};
+    use assert_fs::fixture::TempDir;
     use const_format::formatcp;
     use once_cell::sync::Lazy;
     use std::env;
@@ -141,10 +141,16 @@ mod tests {
 
     static ENV_MUTEX: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
-    static SRC_PARQUET_DIR: &str = formatcp!(
+    static SRC_PARQUET_DIR_CUSTOMERS: &str = formatcp!(
         "{}/{}",
         env!("CARGO_MANIFEST_DIR"),
-        "tests/testdata/unit-tests/parquet_ops"
+        "local/localstack/bucket_data/customer-orders-parquet"
+    );
+
+    static SRC_PARQUET_DIR_DELIVERIES: &str = formatcp!(
+        "{}/{}",
+        env!("CARGO_MANIFEST_DIR"),
+        "local/localstack/bucket_data/deliveries-parquet"
     );
 
     macro_rules! vec_stringify {
@@ -358,17 +364,25 @@ mod tests {
         let original_env: HashMap<String, String> = env::vars().collect();
         set_good_aws_vars();
 
+        let tmp_dir = TempDir::new().unwrap();
+        let tmp_dir_path = format!("{}", tmp_dir.path().display());
+
         // set up aws env vars for localstack
         let res = get(
             String::from("customer-orders-parquet"),
             vec_stringify!["not-a-real-key", "order_01.parquet"], // [not real, real] key
-            ".".to_string(),
+            tmp_dir_path.clone(),
         )
         .await;
 
         restore_env(original_env);
 
-        assert!(res.is_err(), "aws api should fail as no such key");
+        assert!(
+            res.is_err(),
+            "aws api might get order_01.parquet but will fail on not-a-real-key"
+        );
+
+        tmp_dir.close().unwrap(); // can be deleted as read what we need
 
         Ok(())
     }
@@ -381,9 +395,6 @@ mod tests {
         set_good_aws_vars();
 
         let tmp_dir = TempDir::new().unwrap();
-        tmp_dir
-            .copy_from(SRC_PARQUET_DIR, &["order_*.parquet"])
-            .unwrap();
         let tmp_dir_path = format!("{}", tmp_dir.path().display());
         let res = get(
             String::from("customer-orders-parquet"),
@@ -403,7 +414,52 @@ mod tests {
 
         for (s3_key, downloaded_file) in &my_map {
             let (src_contents, downloaded_contents) = get_downloaded_and_src_file_contents(
-                format!("{}/{}", SRC_PARQUET_DIR, s3_key),
+                format!("{}/{}", SRC_PARQUET_DIR_CUSTOMERS, s3_key),
+                downloaded_file.to_string(),
+            )
+            .await
+            .unwrap();
+
+            assert_eq!(src_contents, downloaded_contents,);
+        }
+
+        tmp_dir.close().unwrap(); // can be deleted as read what we need
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_get_happy_path_s3_keys_with_subdirs() -> Result<()> {
+        // set up aws env vars for localstack
+        let _env_lock = ENV_MUTEX.lock().await;
+        let original_env: HashMap<String, String> = env::vars().collect();
+        set_good_aws_vars();
+
+        let tmp_dir = TempDir::new().unwrap();
+        let tmp_dir_path = format!("{}", tmp_dir.path().display());
+
+        let s3_keys = vec_stringify![
+            "parent_dir/subdir_b/001.parquet",
+            "parent_dir/subdir_a/001.parquet"
+        ];
+        let res = get(
+            String::from("deliveries-parquet"),
+            s3_keys.clone(), // [real, real] key
+            tmp_dir_path.clone(),
+        )
+        .await;
+
+        restore_env(original_env);
+
+        assert!(
+            res.is_ok(),
+            "should download, creating s3 path with local subdirs as needed"
+        );
+
+        let my_map = res.unwrap();
+
+        for (s3_key, downloaded_file) in &my_map {
+            let (src_contents, downloaded_contents) = get_downloaded_and_src_file_contents(
+                format!("{}/{}", SRC_PARQUET_DIR_DELIVERIES, s3_key),
                 downloaded_file.to_string(),
             )
             .await
