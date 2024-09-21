@@ -9,6 +9,9 @@ mod parquet_ops;
 mod s3_download;
 mod work_lists;
 
+#[cfg(test)]
+mod test_setup; // for docker-compose setup
+
 #[tokio::main]
 async fn main() -> Result<()> {
     env_logger::init();

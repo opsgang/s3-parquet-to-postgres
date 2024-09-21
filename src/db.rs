@@ -194,6 +194,7 @@ impl Db {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_setup::setup_docker;
     use anyhow::{bail, Result};
     use assert_fs::{fixture::TempDir, prelude::*};
     use const_format::formatcp;
@@ -359,6 +360,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_connect_success() -> Result<()> {
+        setup_docker();
         let table_name = "test_connect_success";
         let _ = create_table_return_client(table_name.to_string()).await;
 
@@ -382,6 +384,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_connect_failure() -> Result<()> {
+        setup_docker();
         let table_name = "test_connect_failure";
         let _ = create_table_return_client(table_name.to_string()).await; // create table
                                                                           // Set up an invalid connection string.
@@ -407,6 +410,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_connect_invalid_tablename() -> Result<()> {
+        setup_docker();
         let table_name = "test_connect_invalid_tablename";
         let _ = create_table_return_client(table_name.to_string()).await; // create table
 
@@ -424,8 +428,10 @@ mod tests {
 
         Ok(())
     }
+
     #[tokio::test]
     async fn test_connect_col_name_not_exist() -> Result<()> {
+        setup_docker();
         let table_name = "test_connect_col_name_not_exist";
         let _ = create_table_return_client(table_name.to_string()).await; // create table
 
@@ -446,6 +452,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_connect_col_name_has_alias() -> Result<()> {
+        setup_docker();
         let table_name = "test_connect_col_name_has_alias";
         let _ = create_table_return_client(table_name.to_string()).await; // create table
 
@@ -477,6 +484,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_connect_db_col_name_has_none_alias_but_parquet_name_is_same() -> Result<()> {
+        setup_docker();
         let table_name = "test_connect_db_col_name_has_none_alias_but_parquet_name_is_same";
         let _ = create_table_return_client(table_name.to_string()).await; // create table
 
@@ -509,6 +517,7 @@ mod tests {
     #[tokio::test]
     async fn test_connect_db_col_name_has_none_alias_but_parquet_name_is_not_same_as_db_col(
     ) -> Result<()> {
+        setup_docker();
         let table_name =
             "test_connect_db_col_name_has_none_alias_but_parquet_name_is_not_same_as_db_col";
         let _ = create_table_return_client(table_name.to_string()).await; // create table
@@ -536,6 +545,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_connect_given_db_col_alias_does_not_exist() -> Result<()> {
+        setup_docker();
         let table_name = "test_connect_given_db_col_alias_does_not_exist";
         let _ = create_table_return_client(table_name.to_string()).await; // create table
 
@@ -562,6 +572,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_write_rows_happy_path() -> Result<()> {
+        setup_docker();
         let table_name = "test_write_rows_happy_path";
         let db = default_db_struct_for_cars_table(table_name).await.unwrap();
         let (tmp_dir, reader) = parquet_cars_reader().await.unwrap();

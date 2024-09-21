@@ -139,6 +139,8 @@ mod tests {
     use tokio::io::AsyncReadExt;
     use tokio::sync::Mutex;
 
+    use crate::test_setup::setup_docker;
+
     static ENV_MUTEX: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
     static SRC_PARQUET_DIR_CUSTOMERS: &str = formatcp!(
@@ -318,6 +320,7 @@ mod tests {
     // pub async fn get(bucket_name: String, s3_keys: Vec<String>, output_dir: String,) -> Result<HashMap<String, String>>
     #[tokio::test]
     async fn test_bad_aws_creds() -> Result<()> {
+        setup_docker();
         let _env_lock = ENV_MUTEX.lock().await;
         let original_env: HashMap<String, String> = env::vars().collect();
         unset_aws_env_vars();
@@ -339,6 +342,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_unknown_bucket() -> Result<()> {
+        setup_docker();
         let _env_lock = ENV_MUTEX.lock().await;
         let original_env: HashMap<String, String> = env::vars().collect();
         set_good_aws_vars();
@@ -360,6 +364,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_unknown_key() -> Result<()> {
+        setup_docker();
         let _env_lock = ENV_MUTEX.lock().await;
         let original_env: HashMap<String, String> = env::vars().collect();
         set_good_aws_vars();
@@ -389,6 +394,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_happy_path_files_at_bucket_root() -> Result<()> {
+        setup_docker();
         // set up aws env vars for localstack
         let _env_lock = ENV_MUTEX.lock().await;
         let original_env: HashMap<String, String> = env::vars().collect();
@@ -429,6 +435,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_happy_path_s3_keys_with_subdirs() -> Result<()> {
+        setup_docker();
         // set up aws env vars for localstack
         let _env_lock = ENV_MUTEX.lock().await;
         let original_env: HashMap<String, String> = env::vars().collect();

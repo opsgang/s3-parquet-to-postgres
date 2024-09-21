@@ -15,8 +15,6 @@ LOCAL_DIR="$(cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd)"
 
 cd "$LOCAL_DIR"
 mkdir -p "$LOCAL_DIR"/{out,work}
-docker compose down --volumes --remove-orphans
-docker compose up -d --wait
 rm -f "$LOCAL_DIR"/out/*.parquet
 rm -f "$LOCAL_DIR"/work/*
 cp "$LOCAL_DIR/todo" "$LOCAL_DIR/work/todo"
