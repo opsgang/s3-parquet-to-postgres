@@ -132,78 +132,19 @@ mod tests {
     use super::*;
     use anyhow::{bail, Result};
     use assert_fs::fixture::TempDir;
-    use const_format::formatcp;
     use once_cell::sync::Lazy;
     use std::env;
-    use tokio::fs;
-    use tokio::io::AsyncReadExt;
     use tokio::sync::Mutex;
 
-    use crate::test_setup::setup_docker;
+    use crate::test_setup::tests::{
+        get_downloaded_and_src_file_contents, restore_env, set_good_aws_vars, setup_docker,
+        unset_aws_env_vars, LOCALSTACK_PARQUET_DIR_CUSTOMERS, LOCALSTACK_PARQUET_DIR_DELIVERIES,
+    };
 
     static ENV_MUTEX: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
-    static SRC_PARQUET_DIR_CUSTOMERS: &str = formatcp!(
-        "{}/{}",
-        env!("CARGO_MANIFEST_DIR"),
-        "local/localstack/bucket_data/customer-orders-parquet"
-    );
-
-    static SRC_PARQUET_DIR_DELIVERIES: &str = formatcp!(
-        "{}/{}",
-        env!("CARGO_MANIFEST_DIR"),
-        "local/localstack/bucket_data/deliveries-parquet"
-    );
-
     macro_rules! vec_stringify {
         ($($x:expr),*) => (vec![$($x.to_string()),*]);
-    }
-
-    fn set_good_aws_vars() {
-        unset_aws_env_vars(); // remove any inherited vars
-        env::set_var("AWS_ACCESS_KEY_ID", "test");
-        env::set_var("AWS_SECRET_ACCESS_KEY", "test");
-        env::set_var("AWS_DEFAULT_REGION", "us-west-1");
-        env::set_var("AWS_ENDPOINT_URL", "http://127.0.0.1:4566");
-    }
-
-    fn unset_aws_env_vars() {
-        let aws_keys: Vec<String> = env::vars()
-            .filter(|(key, _)| key.starts_with("AWS_"))
-            .map(|(key, _)| key)
-            .collect();
-
-        for key in aws_keys {
-            env::remove_var(key);
-        }
-    }
-
-    fn restore_env(original_env: HashMap<String, String>) {
-        for (key, _) in env::vars() {
-            env::remove_var(key);
-        }
-
-        for (key, value) in original_env {
-            env::set_var(key, value);
-        }
-    }
-
-    async fn get_downloaded_and_src_file_contents(
-        src_file_path: String,
-        downloaded_file_path: String,
-    ) -> Result<(Vec<u8>, Vec<u8>)> {
-        let mut src_file = fs::File::open(src_file_path).await?;
-        let mut src_file_contents = Vec::new();
-        src_file.read_to_end(&mut src_file_contents).await?;
-
-        // Read the contents of the second file asynchronously
-        let mut downloaded_file = fs::File::open(downloaded_file_path).await?;
-        let mut downloaded_file_contents = Vec::new();
-        downloaded_file
-            .read_to_end(&mut downloaded_file_contents)
-            .await?;
-
-        Ok((src_file_contents, downloaded_file_contents))
     }
 
     // fn get_dirpath(path_str: &str) -> Result<Option<String>>
@@ -420,7 +361,7 @@ mod tests {
 
         for (s3_key, downloaded_file) in &my_map {
             let (src_contents, downloaded_contents) = get_downloaded_and_src_file_contents(
-                format!("{}/{}", SRC_PARQUET_DIR_CUSTOMERS, s3_key),
+                format!("{}/{}", LOCALSTACK_PARQUET_DIR_CUSTOMERS, s3_key),
                 downloaded_file.to_string(),
             )
             .await
@@ -466,7 +407,7 @@ mod tests {
 
         for (s3_key, downloaded_file) in &my_map {
             let (src_contents, downloaded_contents) = get_downloaded_and_src_file_contents(
-                format!("{}/{}", SRC_PARQUET_DIR_DELIVERIES, s3_key),
+                format!("{}/{}", LOCALSTACK_PARQUET_DIR_DELIVERIES, s3_key),
                 downloaded_file.to_string(),
             )
             .await

@@ -194,175 +194,52 @@ impl Db {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_setup::setup_docker;
-    use anyhow::{bail, Result};
-    use assert_fs::{fixture::TempDir, prelude::*};
-    use const_format::formatcp;
-    use csv::WriterBuilder;
-    use parquet::file::reader::{FileReader, SerializedFileReader};
+    use crate::test_setup::tests::{
+        create_table_return_client, get_rows_as_csv_string, parquet_cars_reader,
+        parquet_iris_reader, setup_docker, GOOD_DB_CONN_STR,
+    };
+    use anyhow::Result;
+    use parquet::file::reader::FileReader;
     use std::any::type_name;
-    use std::fs::File;
-    use std::io::Cursor;
-    use std::path::Path;
+    use std::collections::HashMap;
     use tokio_postgres::types::Type as PgType;
-    use tokio_postgres::Client; // used so data may be verified according to the pg data type
 
     macro_rules! vec_stringify {
         ($($x:expr),*) => (vec![$($x.to_string()),*]);
     }
-
-    static PARQUET_SRC_DIR: &str = formatcp!(
-        "{}/{}",
-        env!("CARGO_MANIFEST_DIR"),
-        "tests/testdata/unit-tests/parquet_ops"
-    );
-
-    const GOOD_DB_CONN_STR: &str = "host=127.0.0.1 user=postgres password=postgres dbname=testing";
 
     #[allow(dead_code)]
     fn type_of<T>(_: T) -> &'static str {
         type_name::<T>()
     }
 
-    async fn default_db_struct_for_cars_table(table_name: &str) -> Result<Db> {
+    pub async fn default_db_struct_for_cars_table(table_name: &str) -> Result<Db> {
         // TODO: create something like:
-        let client = create_table_return_client(table_name.to_string()).await?;
+        let client = create_table_return_client(table_name.to_string(), "car").await?;
         Ok(Db {
             client, // do connection as simply as possible.
             db_cols: vec_stringify!["model", "num_of_cyl", "miles_per_gallon", "gear"],
             db_col_types: vec![PgType::VARCHAR, PgType::INT4, PgType::FLOAT8, PgType::INT4],
             table_name: table_name.to_string(),
         })
-        // TODO2: let it take params
     }
 
-    async fn create_table_return_client(table_name: String) -> Result<Client> {
-        let (client, connection) =
-            tokio_postgres::connect(GOOD_DB_CONN_STR, tokio_postgres::NoTls).await?;
-
-        tokio::spawn(async move {
-            if let Err(e) = connection.await {
-                let msg = format!("db connection error: {}", e);
-                bail!("{}", msg);
-            }
-            Ok(())
-        });
-        client
-            .batch_execute(
-                format!(
-                    "
-            DROP TABLE IF EXISTS {};
-            CREATE TABLE {} (
-                model VARCHAR (255),
-                miles_per_gallon FLOAT8,
-                num_of_cyl INT,
-                disp FLOAT8,
-                hp INT,
-                drat FLOAT8,
-                wt FLOAT8,
-                qsec FLOAT8,
-                vs SMALLINT,
-                am SMALLINT,
-                gear INT,
-                carb SMALLINT
-            );",
-                    table_name.clone(),
-                    table_name.clone()
-                )
-                .as_str(),
-            )
-            .await
-            .unwrap();
-        Ok(client)
-    }
-
-    async fn parquet_cars_reader() -> Result<(TempDir, SerializedFileReader<File>)> {
-        let tmp_dir = TempDir::new().unwrap();
-        tmp_dir
-            .copy_from(PARQUET_SRC_DIR, &["cars.parquet"])
-            .unwrap();
-        let parquet_file = format!("{}/cars.parquet", tmp_dir.path().display());
-        let f = File::open(Path::new(parquet_file.as_str())).unwrap();
-        let reader = SerializedFileReader::new(f).unwrap();
-
-        Ok((tmp_dir, reader))
-    }
-
-    async fn get_rows_as_csv_string(client: &Client, sql: &str) -> Result<String> {
-        let rows = client.query(sql, &[]).await.unwrap();
-
-        let cols = rows
-            .first()
-            .map(|row| {
-                row.columns()
-                    .iter()
-                    .map(|col| col.name().to_string())
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-
-        let mut wtr = WriterBuilder::new()
-            .has_headers(true)
-            .from_writer(Cursor::new(Vec::new()));
-
-        wtr.write_record(&cols)?;
-        for row in rows {
-            let values: Vec<String> = (0..row.len())
-                .map(|i| get_value_as_string(&row, i))
-                .collect::<Result<Vec<String>, _>>()?;
-            wtr.write_record(values)?;
-        }
-
-        let csv_string = String::from_utf8(wtr.into_inner()?.into_inner())?;
-
-        Ok(csv_string)
-    }
-
-    // we use full type spec for row or compiler will think this is a parquet record row
-    fn get_value_as_string(row: &tokio_postgres::Row, idx: usize) -> Result<String> {
-        let column_type = row.columns()[idx].type_();
-        let value_str = match *column_type {
-            // Handle integers
-            tokio_postgres::types::Type::INT2 => row
-                .get::<_, Option<i16>>(idx)
-                .map_or("".to_string(), |v| v.to_string()),
-            tokio_postgres::types::Type::INT4 => row
-                .get::<_, Option<i32>>(idx)
-                .map_or("".to_string(), |v| v.to_string()),
-            tokio_postgres::types::Type::INT8 => row
-                .get::<_, Option<i64>>(idx)
-                .map_or("".to_string(), |v| v.to_string()),
-
-            // Handle floating point numbers
-            tokio_postgres::types::Type::FLOAT4 => row
-                .get::<_, Option<f32>>(idx)
-                .map_or("".to_string(), |v| v.to_string()),
-            tokio_postgres::types::Type::FLOAT8 => row
-                .get::<_, Option<f64>>(idx)
-                .map_or("".to_string(), |v| v.to_string()),
-
-            // Handle string types
-            tokio_postgres::types::Type::TEXT | tokio_postgres::types::Type::VARCHAR => row
-                .get::<_, Option<String>>(idx)
-                .map_or("".to_string(), |v| v),
-
-            // Handle other types as needed
-            tokio_postgres::types::Type::BOOL => row
-                .get::<_, Option<bool>>(idx)
-                .map_or("".to_string(), |v| v.to_string()),
-
-            // Fallback for other types
-            _ => "".to_string(),
-        };
-
-        Ok(value_str)
+    pub async fn default_db_struct_for_iris_table(table_name: &str) -> Result<Db> {
+        // TODO: create something like:
+        let client = create_table_return_client(table_name.to_string(), "iris").await?;
+        Ok(Db {
+            client, // do connection as simply as possible.
+            db_cols: vec_stringify!["variety", "\"sepal.length\"", "\"sepal.width\""],
+            db_col_types: vec![PgType::VARCHAR, PgType::FLOAT8, PgType::FLOAT8],
+            table_name: table_name.to_string(),
+        })
     }
 
     #[tokio::test]
     async fn test_connect_success() -> Result<()> {
         setup_docker();
         let table_name = "test_connect_success";
-        let _ = create_table_return_client(table_name.to_string()).await;
+        let _ = create_table_return_client(table_name.to_string(), "car").await;
 
         // Attempt to connect.
         let db = Db::connect(
@@ -386,8 +263,8 @@ mod tests {
     async fn test_connect_failure() -> Result<()> {
         setup_docker();
         let table_name = "test_connect_failure";
-        let _ = create_table_return_client(table_name.to_string()).await; // create table
-                                                                          // Set up an invalid connection string.
+        let _ = create_table_return_client(table_name.to_string(), "car").await; // create table
+                                                                                 // Set up an invalid connection string.
         let invalid_conn_str = "apples and pears";
 
         // Attempt to connect.
@@ -412,7 +289,7 @@ mod tests {
     async fn test_connect_invalid_tablename() -> Result<()> {
         setup_docker();
         let table_name = "test_connect_invalid_tablename";
-        let _ = create_table_return_client(table_name.to_string()).await; // create table
+        let _ = create_table_return_client(table_name.to_string(), "car").await; // create table
 
         // Attempt to connect.
         let db = Db::connect(
@@ -433,7 +310,7 @@ mod tests {
     async fn test_connect_col_name_not_exist() -> Result<()> {
         setup_docker();
         let table_name = "test_connect_col_name_not_exist";
-        let _ = create_table_return_client(table_name.to_string()).await; // create table
+        let _ = create_table_return_client(table_name.to_string(), "car").await; // create table
 
         // Attempt to connect.
         let db = Db::connect(
@@ -454,7 +331,7 @@ mod tests {
     async fn test_connect_col_name_has_alias() -> Result<()> {
         setup_docker();
         let table_name = "test_connect_col_name_has_alias";
-        let _ = create_table_return_client(table_name.to_string()).await; // create table
+        let _ = create_table_return_client(table_name.to_string(), "car").await; // create table
 
         let aliases: HashMap<String, Option<String>> = HashMap::from([
             ("i.model".to_string(), Some("model".to_string())),
@@ -486,7 +363,7 @@ mod tests {
     async fn test_connect_db_col_name_has_none_alias_but_parquet_name_is_same() -> Result<()> {
         setup_docker();
         let table_name = "test_connect_db_col_name_has_none_alias_but_parquet_name_is_same";
-        let _ = create_table_return_client(table_name.to_string()).await; // create table
+        let _ = create_table_return_client(table_name.to_string(), "car").await; // create table
 
         let aliases: HashMap<String, Option<String>> = HashMap::from([
             ("model".to_string(), None), // should use delivery_id
@@ -520,7 +397,7 @@ mod tests {
         setup_docker();
         let table_name =
             "test_connect_db_col_name_has_none_alias_but_parquet_name_is_not_same_as_db_col";
-        let _ = create_table_return_client(table_name.to_string()).await; // create table
+        let _ = create_table_return_client(table_name.to_string(), "car").await; // create table
 
         let aliases: HashMap<String, Option<String>> = HashMap::from([
             ("model".to_string(), None),
@@ -547,7 +424,7 @@ mod tests {
     async fn test_connect_given_db_col_alias_does_not_exist() -> Result<()> {
         setup_docker();
         let table_name = "test_connect_given_db_col_alias_does_not_exist";
-        let _ = create_table_return_client(table_name.to_string()).await; // create table
+        let _ = create_table_return_client(table_name.to_string(), "car").await; // create table
 
         let aliases: HashMap<String, Option<String>> = HashMap::from([
             ("model".to_string(), Some("not_a_col".to_string())), // not_a_col doesn't exist in db
@@ -588,6 +465,33 @@ mod tests {
             model,miles_per_gallon,num_of_cyl,disp,hp,drat,wt,qsec,vs,am,gear,carb\n\
             Volvo 142E,21.4,4,,,,,,,,4,\n\
             Valiant,18.1,6,,,,,,,,3,\n\
+        ";
+        let csv_string = get_rows_as_csv_string(&db.client, sql.as_str())
+            .await
+            .unwrap();
+        assert_eq!(csv_string, exp_string.to_string());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_write_rows_quoted_db_cols_happy_path() -> Result<()> {
+        setup_docker();
+        let table_name = "test_write_rows_quoted_db_cols_happy_path";
+        let db = default_db_struct_for_iris_table(table_name).await.unwrap();
+        let (tmp_dir, reader) = parquet_iris_reader().await.unwrap();
+        let row_iter: parquet::record::reader::RowIter = reader.get_row_iter(None).unwrap();
+
+        let col_nums = vec![4, 0, 1]; // col numbers in parquet, in the order we write the data
+        let num_rows_added = db.write_rows(row_iter, &col_nums).await?;
+        tmp_dir.close().unwrap(); // can be deleted as read what we need
+
+        assert_eq!(num_rows_added, 150);
+        let sql = format!("SELECT * from {} ORDER by variety DESC LIMIT 2", table_name);
+        let exp_string = "\
+            sepal.length,sepal.width,petal.length,petal.width,variety\n\
+            6.3,3.3,,,Virginica\n\
+            5.8,2.7,,,Virginica\n\
         ";
         let csv_string = get_rows_as_csv_string(&db.client, sql.as_str())
             .await

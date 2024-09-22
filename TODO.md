@@ -3,10 +3,6 @@
     * split out main.rs boilerplate into separate wrapper.rs
         * should ultimately call one function with path to yaml
 
-* Add db + write example with cols with special chars
-    (should be quoted in SELECT and INSERT)
-
-
 ```rust
 mod test_setup;
 
