@@ -44,27 +44,20 @@ fn run_docker_compose_up() {
 // Setup function that runs once before all tests
 pub fn setup_docker() {
     static DOCKER_SETUP: Lazy<()> = Lazy::new(|| {
-        // Ensure docker exists
         if !docker_exists() {
             panic!("Docker is not installed or not found in PATH");
         }
-        println!("Docker exists");
 
-        // Change directory to ${CARGO_MANIFEST_DIR}/local
+        // cd to docker-compose dir
         let cargo_manifest_dir =
             env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set");
         let local_dir = Path::new(&cargo_manifest_dir).join("local");
 
         env::set_current_dir(&local_dir).expect("Failed to change directory to local");
-        println!("cd to cargo local dir");
 
-        // Run docker compose down and up
         run_docker_compose_down();
-        println!("running down");
         run_docker_compose_up();
-        println!("running up");
     });
 
-    // Ensure that the Lazy static block runs
     Lazy::force(&DOCKER_SETUP);
 }
