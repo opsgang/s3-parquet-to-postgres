@@ -14,6 +14,7 @@ mod test_setup; // for docker-compose setup
 #[tokio::main]
 async fn main() -> Result<()> {
     env_logger::init();
+    // do this in main as command line arg collection only relevant to binary
     let cfg_file: String = cmd_args::config_yaml(|| std::env::args().collect::<Vec<String>>())?;
 
     runner::run(cfg_file.as_str()).await?;

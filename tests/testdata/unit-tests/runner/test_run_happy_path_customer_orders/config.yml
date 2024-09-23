@@ -2,14 +2,14 @@
 
 # The db destination to hold the results
 db:
-  table_name: customer_orders
-  conn_str: "host=127.0.0.1 password=postgres user=postgres dbname=warehouse"
+  table_name: "test_run_happy_path_customer_orders" # must be same as created in test's setup
+  conn_str: "host=127.0.0.1 password=postgres user=postgres dbname=testing"
 
 # Where to get the source parquet files, and how many at once to download
 s3:
   bucket: "customer-orders-parquet"
   download_batch_size: 4
-  downloads_dir: "local/out" # assumes binary is run from repo root dir
+  downloads_dir: "out" # assumes binary is run from repo root dir
 
 # The parquet files contain a lot of columns. Which ones do we need to write to the db?
 parquet:
@@ -25,4 +25,4 @@ parquet_to_db:
   desc: description
 
 work_lists:
-  dir: "local/work" # assumes binary is run from repo root dir
+  dir: "work" # assumes binary is run from repo root dir

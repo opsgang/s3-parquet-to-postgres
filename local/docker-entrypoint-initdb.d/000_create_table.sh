@@ -18,6 +18,7 @@ psql -v ON_ERROR_STOP=1 <<-EOSQL
         id BIGINT,
         description VARCHAR (255),
         some_unsigned_float DOUBLE PRECISION,
-        some_positive_int BIGINT
+        some_positive_int BIGINT,
+        some_fraction FLOAT8
     );
 EOSQL

@@ -1,0 +1,32 @@
+# vim: et sr sw=2 ts=2 smartindent:
+#
+# This file should be the same as ../test_run_happy_path_customer_orders/config.yml
+# except for the table name to inspect.
+# The expected outcome here is failure, as the db constraint of customer_name NOT NULL
+# is violated by some rows in the parquet data
+
+# The db destination to hold the results
+db:
+  table_name: "test_run_customer_orders_constraint_violation" # must be same as created in test's setup
+  conn_str: "host=127.0.0.1 password=postgres user=postgres dbname=testing"
+
+# Where to get the source parquet files, and how many at once to download
+s3:
+  bucket: "customer-orders-parquet"
+  download_batch_size: 4
+  downloads_dir: "out" # assumes binary is run from repo root dir
+
+# The parquet files contain a lot of columns. Which ones do we need to write to the db?
+parquet:
+  desired_fields:
+    - order_id
+    - customer_name
+    - desc
+    - some_fraction
+
+parquet_to_db:
+  order_id: id
+  desc: description
+
+work_lists:
+  dir: "work" # assumes binary is run from repo root dir

@@ -19,6 +19,12 @@ rm -f "$LOCAL_DIR"/out/*.parquet
 rm -f "$LOCAL_DIR"/work/*
 cp "$LOCAL_DIR/todo" "$LOCAL_DIR/work/todo"
 
+# Running tests will restart the docker stack, but that doesn't happen in release mode.
+if [[ -n "$RELEASE_BUILD" ]]; then
+    docker compose down --volumes --remove-orphans
+    docker compose up -d --wait
+fi
+
 cd .. # should be repo root dir
 cargo build ${RELEASE_BUILD} # do not quote the var, as cargo picks up the zero length string!
 

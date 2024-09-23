@@ -1,10 +1,10 @@
 use anyhow::{bail, Result}; // don't need to return Result<T,E>
-use log::{debug, error};
+use log::{debug, error, warn};
 use parquet::record::{Field, Row};
 use pin_utils::pin_mut;
 use std::collections::HashMap;
 use tokio_postgres::binary_copy::BinaryCopyInWriter; // let's us pg COPY from STDIN
-use tokio_postgres::types::{ToSql, Type as PgType};
+use tokio_postgres::types::{to_sql_checked, IsNull, ToSql, Type as PgType};
 use tokio_postgres::Client; // used so data may be verified according to the pg data type
 
 async fn db_col_to_type(client: &Client, table_name: &str) -> Result<HashMap<String, PgType>> {
@@ -156,29 +156,8 @@ impl Db {
                 .map(|index| all_fields[*index].1.clone())
                 .collect();
 
-            let mut row_data: Vec<_> = desired_fields
-                .iter()
-                .filter_map(|f| match f {
-                    Field::Null => None,
-                    Field::Bool(v) => Some(v as &(dyn ToSql + Sync)),
-                    Field::Byte(v) => Some(v as &(dyn ToSql + Sync)),
-                    Field::Short(v) => Some(v as &(dyn ToSql + Sync)),
-                    Field::Int(v) => Some(v as &(dyn ToSql + Sync)),
-                    Field::Long(v) => Some(v as &(dyn ToSql + Sync)),
-                    Field::UInt(v) => Some(v as &(dyn ToSql + Sync)),
-                    Field::Float(v) => Some(v as &(dyn ToSql + Sync)),
-                    Field::Double(v) => Some(v as &(dyn ToSql + Sync)),
-                    Field::Str(v) => Some(v as &(dyn ToSql + Sync)),
-                    Field::Date(v) => Some(v as &(dyn ToSql + Sync)),
-                    Field::TimestampMillis(v) => Some(v as &(dyn ToSql + Sync)),
-                    Field::TimestampMicros(v) => Some(v as &(dyn ToSql + Sync)),
-                    _ => {
-                        error!("ToSQL not implemented for {}", f);
-                        None
-                    }
-                })
-                .collect();
-
+            let mut row_data = create_row_data(&desired_fields);
+            debug!("ROW IS {:?}", &row_data);
             writer.as_mut().write(&row_data).await?;
             row_data.clear();
         }
@@ -187,6 +166,52 @@ impl Db {
 
         Ok(num_rows_added)
     }
+}
+
+#[derive(Debug)]
+struct NullMarker;
+
+impl ToSql for NullMarker {
+    fn to_sql(
+        &self,
+        _ty: &tokio_postgres::types::Type,
+        _buf: &mut tokio_postgres::types::private::BytesMut,
+    ) -> Result<IsNull, Box<dyn std::error::Error + Sync + Send>> {
+        Ok(IsNull::Yes) // Represents NULL in PostgreSQL
+    }
+
+    fn accepts(_ty: &tokio_postgres::types::Type) -> bool {
+        true // Accept any type
+    }
+
+    to_sql_checked!();
+}
+
+fn create_row_data(desired_fields: &[Field]) -> Vec<&(dyn ToSql + Sync)> {
+    let null_marker = &NullMarker;
+
+    desired_fields
+        .iter()
+        .map(|f| match f {
+            Field::Null => null_marker as &(dyn ToSql + Sync), // Use NullMarker for NULL values
+            Field::Bool(v) => v as &(dyn ToSql + Sync),
+            Field::Byte(v) => v as &(dyn ToSql + Sync),
+            Field::Short(v) => v as &(dyn ToSql + Sync),
+            Field::Int(v) => v as &(dyn ToSql + Sync),
+            Field::Long(v) => v as &(dyn ToSql + Sync),
+            Field::UInt(v) => v as &(dyn ToSql + Sync),
+            Field::Float(v) => v as &(dyn ToSql + Sync),
+            Field::Double(v) => v as &(dyn ToSql + Sync),
+            Field::Str(v) => v as &(dyn ToSql + Sync),
+            Field::Date(v) => v as &(dyn ToSql + Sync),
+            Field::TimestampMillis(v) => v as &(dyn ToSql + Sync),
+            Field::TimestampMicros(v) => v as &(dyn ToSql + Sync),
+            _ => {
+                warn!("ToSQL not implemented for {:?}", f);
+                null_marker // Use NullMarker for unknown cases as well
+            }
+        })
+        .collect()
 }
 
 // These tests only make sense if there is a real running postgres.

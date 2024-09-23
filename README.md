@@ -17,9 +17,17 @@ need to reinvent the wheel. Here you go.
 
 ## RUN
 
-See BINARY.md for examples
 
-## CAVEAT
+```bash
+# install latest release binary and:
+s3-parquet-to-postgres /path/to/config.yml
+
+# build from this repo if you have rustc 1.80.x or higher
+cargo build -r
+target/release/s3-parquet-to-postgres /path/to/config.yml
+```
+
+## CAVEAT - MAPPING PARQUET TYPE TO POSTGRES TYPES
 
 The columns in your destination db table are expected to have data types compatible with the
 corresponding parquet file's column types _as resolved by the parquet crate_.
@@ -59,8 +67,6 @@ export RUST_LOG=info,s3_parquet_to_postgres=debug,work_lists=debug,s3_download=d
 export RUST_LOG=info
 
 ## local/reset-local.sh
-# The reset-local.sh script requires permissions to read from our S3 bucket
-# defined in the local/config.yml
 
 # build debug binary and run the tests
 ./local/reset-local.sh # requires docker / docker-compose

@@ -14,6 +14,7 @@ pub mod tests {
     use const_format::formatcp;
     use csv::WriterBuilder;
     use lazy_static::lazy_static;
+    use log::debug;
     use once_cell::sync::Lazy;
     use parquet::file::reader::SerializedFileReader;
     use std::collections::HashMap;
@@ -42,6 +43,26 @@ pub mod tests {
                 am SMALLINT,
                 gear INT,
                 carb SMALLINT
+    "#;
+
+    pub const CUSTOMER_ORDER_COLS_FOR_CREATE: &str = r#"
+                id BIGINT NOT NULL,
+                customer_name VARCHAR (255),
+                description VARCHAR (255),
+                some_unsigned_float DOUBLE PRECISION,
+                some_positive_int BIGINT,
+                some_fraction FLOAT8
+    "#;
+
+    // customer order_00.parquet has rows with null some_fraction
+    // so NOT NULL constraint on that col will cause failure
+    pub const CUSTOMER_ORDER_VIOLATED_CONSTRAINT_COLS_FOR_CREATE: &str = r#"
+                id BIGINT,
+                customer_name VARCHAR (255),
+                description VARCHAR (255),
+                some_unsigned_float DOUBLE PRECISION,
+                some_positive_int BIGINT,
+                some_fraction FLOAT8 NOT NULL
     "#;
 
     pub const IRIS_COLS_FOR_CREATE: &str = r#"
@@ -74,9 +95,49 @@ pub mod tests {
         static ref COLS_FOR_CREATE: HashMap<&'static str, &'static str> = {
             let mut m = HashMap::new();
             m.insert("car", CARS_COLS_FOR_CREATE);
+            m.insert("customer_order", CUSTOMER_ORDER_COLS_FOR_CREATE);
+            m.insert(
+                "customer_order_violated_constraint",
+                CUSTOMER_ORDER_VIOLATED_CONSTRAINT_COLS_FOR_CREATE,
+            );
             m.insert("iris", IRIS_COLS_FOR_CREATE);
             m
         };
+    }
+
+    pub fn render_tmpl_str(template: &str, values: Vec<&str>) -> String {
+        let mut result = template.to_string(); // Start with the template as a String
+        let placeholder_iter = values.iter(); // Create an iterator over the vector
+
+        // Replace each occurrence of "{}" with the next value from the iterator
+        for value in placeholder_iter {
+            if let Some(start) = result.find("{}") {
+                result.replace_range(start..start + 2, value); // Replace the first "{}"
+            } else {
+                break; // No more placeholders to replace
+            }
+        }
+
+        result
+    }
+
+    #[allow(dead_code)]
+    pub fn print_files_recursively(dir: &Path) -> Result<()> {
+        use std::fs;
+        // Iterate over the directory entries
+        for entry in fs::read_dir(dir)? {
+            let entry = entry?;
+            let path = entry.path();
+
+            // If the entry is a directory, recursively call this function
+            if path.is_dir() {
+                print_files_recursively(&path)?;
+            } else {
+                // Print the file path
+                debug!("{}", path.display());
+            }
+        }
+        Ok(())
     }
 
     pub async fn create_table_return_client(
@@ -105,9 +166,7 @@ pub mod tests {
         client
             .batch_execute(
                 format!(
-                    "
-            DROP TABLE IF EXISTS {};
-            CREATE TABLE {} ({});",
+                    "DROP TABLE IF EXISTS {}; CREATE TABLE {} ({});",
                     table_name.clone(),
                     table_name.clone(),
                     cols_for_create,
@@ -302,10 +361,13 @@ pub mod tests {
                 env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set");
             let local_dir = Path::new(&cargo_manifest_dir).join("local");
 
+            let this_dir = env::current_dir().unwrap();
             env::set_current_dir(&local_dir).expect("Failed to change directory to local");
 
             run_docker_compose_down();
             run_docker_compose_up();
+
+            env::set_current_dir(&this_dir).expect("Failed to change directory to original");
         });
 
         Lazy::force(&DOCKER_SETUP);

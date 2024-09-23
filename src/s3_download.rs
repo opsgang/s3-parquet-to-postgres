@@ -141,7 +141,7 @@ mod tests {
         unset_aws_env_vars, LOCALSTACK_PARQUET_DIR_CUSTOMERS, LOCALSTACK_PARQUET_DIR_DELIVERIES,
     };
 
-    static ENV_MUTEX: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+    static LOCK_ENV_S3_DOWNLOAD_TESTS: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
     macro_rules! vec_stringify {
         ($($x:expr),*) => (vec![$($x.to_string()),*]);
@@ -262,7 +262,7 @@ mod tests {
     #[tokio::test]
     async fn test_bad_aws_creds() -> Result<()> {
         setup_docker();
-        let _env_lock = ENV_MUTEX.lock().await;
+        let _env_lock = LOCK_ENV_S3_DOWNLOAD_TESTS.lock().await;
         let original_env: HashMap<String, String> = env::vars().collect();
         unset_aws_env_vars();
 
@@ -284,7 +284,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_unknown_bucket() -> Result<()> {
         setup_docker();
-        let _env_lock = ENV_MUTEX.lock().await;
+        let _env_lock = LOCK_ENV_S3_DOWNLOAD_TESTS.lock().await;
         let original_env: HashMap<String, String> = env::vars().collect();
         set_good_aws_vars();
 
@@ -306,14 +306,14 @@ mod tests {
     #[tokio::test]
     async fn test_get_unknown_key() -> Result<()> {
         setup_docker();
-        let _env_lock = ENV_MUTEX.lock().await;
+        // set up aws env vars for localstack
+        let _env_lock = LOCK_ENV_S3_DOWNLOAD_TESTS.lock().await;
         let original_env: HashMap<String, String> = env::vars().collect();
         set_good_aws_vars();
 
         let tmp_dir = TempDir::new().unwrap();
         let tmp_dir_path = format!("{}", tmp_dir.path().display());
 
-        // set up aws env vars for localstack
         let res = get(
             String::from("customer-orders-parquet"),
             vec_stringify!["not-a-real-key", "order_01.parquet"], // [not real, real] key
@@ -337,7 +337,7 @@ mod tests {
     async fn test_get_happy_path_files_at_bucket_root() -> Result<()> {
         setup_docker();
         // set up aws env vars for localstack
-        let _env_lock = ENV_MUTEX.lock().await;
+        let _env_lock = LOCK_ENV_S3_DOWNLOAD_TESTS.lock().await;
         let original_env: HashMap<String, String> = env::vars().collect();
         set_good_aws_vars();
 
@@ -378,7 +378,7 @@ mod tests {
     async fn test_get_happy_path_s3_keys_with_subdirs() -> Result<()> {
         setup_docker();
         // set up aws env vars for localstack
-        let _env_lock = ENV_MUTEX.lock().await;
+        let _env_lock = LOCK_ENV_S3_DOWNLOAD_TESTS.lock().await;
         let original_env: HashMap<String, String> = env::vars().collect();
         set_good_aws_vars();
 
