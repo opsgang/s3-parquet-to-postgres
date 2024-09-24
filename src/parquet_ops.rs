@@ -75,6 +75,8 @@ mod tests {
     use std::env;
     use std::fs::File;
 
+    use crate::test_setup::tests::LOCALSTACK_PARQUET_DIR_IRIS;
+
     static TESTDATA_DIR: &str = formatcp!(
         "{}/{}",
         env!("CARGO_MANIFEST_DIR"),
@@ -93,7 +95,9 @@ mod tests {
         desired_fields: Vec<String>,
     ) -> Result<(TempDir, Parquet, SerializedFileReader<File>)> {
         let tmp_dir = TempDir::new().unwrap();
-        tmp_dir.copy_from(TESTDATA_DIR, &["iris.parquet"]).unwrap();
+        tmp_dir
+            .copy_from(LOCALSTACK_PARQUET_DIR_IRIS, &["iris.parquet"])
+            .unwrap();
         let parquet_file = format!("{}/iris.parquet", tmp_dir.path().display());
 
         let pq = Parquet {
@@ -132,7 +136,9 @@ mod tests {
     #[test]
     fn test_file_reader_valid_parquet_file() {
         let tmp_dir = TempDir::new().unwrap();
-        tmp_dir.copy_from(TESTDATA_DIR, &["iris.parquet"]).unwrap();
+        tmp_dir
+            .copy_from(LOCALSTACK_PARQUET_DIR_IRIS, &["iris.parquet"])
+            .unwrap();
 
         let parquet_file = format!("{}/iris.parquet", tmp_dir.path().display());
 
@@ -236,9 +242,9 @@ PARQUET META:
 
 IRIS
 =====
-parquet meta tests/testdata/unit-tests/parquet_ops/iris.parquet
+parquet meta local/localstack/bucket_data/iris-parquet/iris.parquet
 
-File path:  tests/testdata/unit-tests/parquet_ops/iris.parquet
+File path:  local/localstack/bucket_data/iris-parquet/iris.parquet
 Created by: DuckDB
 Properties: (none)
 Schema:
@@ -262,9 +268,9 @@ variety       BINARY    S RRR_    150       0.57 B     0       "Setosa" / "Virgi
 
 CARS
 ====
-parquet meta tests/testdata/unit-tests/parquet_ops/cars.parquet
+parquet meta local/localstack/bucket_data/cars-parquet/cars.parquet
 
-File path:  tests/testdata/unit-tests/parquet_ops/cars.parquet
+File path:  local/localstack/bucket_data/cars-parquet/cars.parquet
 Created by: DuckDB
 Properties: (none)
 Schema:

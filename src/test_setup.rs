@@ -73,22 +73,34 @@ pub mod tests {
                 variety VARCHAR(255)
     "#;
 
-    static PARQUET_SRC_DIR: &str = formatcp!(
-        "{}/{}",
+    const LOCALSTACK_PARQUET_DIR: &str = "local/localstack/bucket_data";
+
+    pub static LOCALSTACK_PARQUET_DIR_CARS: &str = formatcp!(
+        "{}/{}/{}",
         env!("CARGO_MANIFEST_DIR"),
-        "tests/testdata/unit-tests/parquet_ops"
+        LOCALSTACK_PARQUET_DIR,
+        "cars-parquet"
     );
 
     pub static LOCALSTACK_PARQUET_DIR_CUSTOMERS: &str = formatcp!(
-        "{}/{}",
+        "{}/{}/{}",
         env!("CARGO_MANIFEST_DIR"),
-        "local/localstack/bucket_data/customer-orders-parquet"
+        LOCALSTACK_PARQUET_DIR,
+        "customer-orders-parquet"
     );
 
     pub static LOCALSTACK_PARQUET_DIR_DELIVERIES: &str = formatcp!(
-        "{}/{}",
+        "{}/{}/{}",
         env!("CARGO_MANIFEST_DIR"),
-        "local/localstack/bucket_data/deliveries-parquet"
+        LOCALSTACK_PARQUET_DIR,
+        "deliveries-parquet"
+    );
+
+    pub static LOCALSTACK_PARQUET_DIR_IRIS: &str = formatcp!(
+        "{}/{}/{}",
+        env!("CARGO_MANIFEST_DIR"),
+        LOCALSTACK_PARQUET_DIR,
+        "iris-parquet"
     );
 
     lazy_static! {
@@ -181,7 +193,7 @@ pub mod tests {
     pub async fn parquet_cars_reader() -> Result<(TempDir, SerializedFileReader<File>)> {
         let tmp_dir = TempDir::new().unwrap();
         tmp_dir
-            .copy_from(PARQUET_SRC_DIR, &["cars.parquet"])
+            .copy_from(LOCALSTACK_PARQUET_DIR_CARS, &["cars.parquet"])
             .unwrap();
         let parquet_file = format!("{}/cars.parquet", tmp_dir.path().display());
         let f = File::open(Path::new(parquet_file.as_str())).unwrap();
@@ -193,7 +205,7 @@ pub mod tests {
     pub async fn parquet_iris_reader() -> Result<(TempDir, SerializedFileReader<File>)> {
         let tmp_dir = TempDir::new().unwrap();
         tmp_dir
-            .copy_from(PARQUET_SRC_DIR, &["iris.parquet"])
+            .copy_from(LOCALSTACK_PARQUET_DIR_IRIS, &["iris.parquet"])
             .unwrap();
         let parquet_file = format!("{}/iris.parquet", tmp_dir.path().display());
         let f = File::open(Path::new(parquet_file.as_str())).unwrap();
