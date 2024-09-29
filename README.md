@@ -2,6 +2,8 @@
 
 [1]: https://arrow.apache.org/rust/parquet/record/enum.Field.html "parquet to rust type mapping"
 [2]: https://docs.rs/postgres-types/latest/postgres_types/trait.ToSql.html#types "rust to postgres type mapping"
+[3]: https://github.com/sfackler/rust-postgres/blob/master/postgres-types/src/lib.rs  "see simple_type! and other mappings"
+[4]: https://github.com/sfackler/rust-postgres/blob/master/postgres-types/src/type_gen.rs "available constants under impl Type"
 
 >
 > Concurrently downloads parquet files from s3 in batches from a todo list.
@@ -16,7 +18,6 @@ If you say yes to both, we're probably working for the same company and you don'
 need to reinvent the wheel. Here you go.
 
 ## RUN
-
 
 ```bash
 # install latest release binary and:
@@ -39,6 +40,18 @@ Check [the Parquet crate docs][1] for `Field` `enum`
 for the internal rust types that correspond to the parquet types.
 
 Check [here][2] for the mapping of rust to postgres data types.
+And probably [here][3] and [here][4].
+
+### unsupported postgres types
+
+Only the types supported by Parquet are mapped by default
+to the equivalent postgres column types. Don't expect to store
+data direct to an ip address type.
+
+This module doesn't do any fancy casting.
+
+Field::TimestampMillis date +%s%3N
+Field::TimestampMicros $(( $(date +%s%3N) * 1000 ))
 
 ## PERFORMANCE
 

@@ -2,10 +2,33 @@ use anyhow::{bail, Result}; // don't need to return Result<T,E>
 use log::{debug, error, warn};
 use parquet::record::{Field, Row};
 use pin_utils::pin_mut;
+use std::any::type_name;
 use std::collections::HashMap;
+use std::fmt;
 use tokio_postgres::binary_copy::BinaryCopyInWriter; // let's us pg COPY from STDIN
 use tokio_postgres::types::{to_sql_checked, IsNull, ToSql, Type as PgType};
 use tokio_postgres::Client; // used so data may be verified according to the pg data type
+
+#[derive(Debug)]
+struct MultiLineError {
+    msg: String,
+}
+
+impl fmt::Display for MultiLineError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let lines: &Vec<String> = &self.msg.lines().map(String::from).collect();
+        for line in lines {
+            writeln!(f, "{}", line)?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for MultiLineError {}
+
+fn type_of<T>(_: T) -> &'static str {
+    type_name::<T>()
+}
 
 async fn db_col_to_type(client: &Client, table_name: &str) -> Result<HashMap<String, PgType>> {
     // The SQL query to get column names and type OIDs
@@ -155,16 +178,52 @@ impl Db {
                 .iter()
                 .map(|index| all_fields[*index].1.clone())
                 .collect();
+            // TODO - to allow for conversions to db col type,
+            // iterate over desired_field and related col_type and get back the data
+            // can let iter = zip(desired_fields.clone(), self.db_col_types.clone());
+            // then iter.next returns let (field, col_type) and we can encode accordingly
+            let (mut row_data, type_data) = create_row_data(&desired_fields);
 
-            let mut row_data = create_row_data(&desired_fields);
-            debug!("ROW IS {:?}", &row_data);
-            writer.as_mut().write(&row_data).await?;
+            debug!("SELECTED ROW DATA: {:?}", &row_data);
+            debug!("RUST DATA TYPES: {:?}", &type_data);
+            match writer.as_mut().write(&row_data).await {
+                Ok(_) => debug!("row written to db"),
+                Err(e) => {
+                    let msg = format!(
+                        "\
+                       Issue writing row to db: \n\
+                       {}\n\
+                       column names are: {:?}\n\
+                       db col types are: {:?}\n\
+                       rust types of data: {:?}\n\
+                    ",
+                        e, &self.db_cols, &self.db_col_types, type_data,
+                    );
+                    bail!(MultiLineError { msg });
+                }
+            };
             row_data.clear();
         }
 
-        let num_rows_added = writer.finish().await?;
-
-        Ok(num_rows_added)
+        // Some issues may only present when the COPY executes - on writer.finish()
+        match writer.finish().await {
+            Ok(num_rows_added) => Ok(num_rows_added),
+            Err(e) => {
+                let msg = format!("\
+                    Issue flushing data to db: \n\
+                    {}\n\
+                    column names are: {:?}\n\
+                    db col types are: {:?}\n\
+                    Check the types of the corresponding parquet row data:\n\
+                    Either run with RUST_LOG=db=debug, or use a parquet inspector to check the metadata\n\
+                ",
+                    e,
+                    &self.db_cols,
+                    &self.db_col_types,
+                );
+                bail!(MultiLineError { msg });
+            }
+        }
     }
 }
 
@@ -187,10 +246,13 @@ impl ToSql for NullMarker {
     to_sql_checked!();
 }
 
-fn create_row_data(desired_fields: &[Field]) -> Vec<&(dyn ToSql + Sync)> {
+// TODO: need lookup of db_col_name to { 'parquet_col_type', 'db_col_type' }?
+// Or in outerloop that calls this, pass this func the required params instead of a hashmap
+fn create_row_data(desired_fields: &[Field]) -> (Vec<&(dyn ToSql + Sync)>, Vec<&str>) {
     let null_marker = &NullMarker;
 
-    desired_fields
+    // TODO: use Iterator::unzip https://users.rust-lang.org/t/collect-vec-of-tuples-into-two-vecs/63407
+    let row_data: Vec<&(dyn ToSql + Sync)> = desired_fields
         .iter()
         .map(|f| match f {
             Field::Null => null_marker as &(dyn ToSql + Sync), // Use NullMarker for NULL values
@@ -203,19 +265,48 @@ fn create_row_data(desired_fields: &[Field]) -> Vec<&(dyn ToSql + Sync)> {
             Field::Float(v) => v as &(dyn ToSql + Sync),
             Field::Double(v) => v as &(dyn ToSql + Sync),
             Field::Str(v) => v as &(dyn ToSql + Sync),
-            Field::Date(v) => v as &(dyn ToSql + Sync),
+            Field::Date(v) => {
+                // CONVERT v if needed
+                v as &(dyn ToSql + Sync)
+            }
             Field::TimestampMillis(v) => v as &(dyn ToSql + Sync),
             Field::TimestampMicros(v) => v as &(dyn ToSql + Sync),
             _ => {
-                warn!("ToSQL not implemented for {:?}", f);
+                warn!("ToSQL not implemented for Field enum variant {:?}", f);
                 null_marker // Use NullMarker for unknown cases as well
             }
         })
-        .collect()
+        .collect();
+
+    let type_data: Vec<&str> = desired_fields
+        .iter()
+        .map(|f| match f {
+            Field::Null => "Null", // Use NullMarker for NULL values
+            Field::Bool(v) => type_of(v),
+            Field::Byte(v) => type_of(v),
+            Field::Short(v) => type_of(v),
+            Field::Int(v) => type_of(v),
+            Field::Long(v) => type_of(v),
+            Field::UInt(v) => type_of(v),
+            Field::Float(v) => type_of(v),
+            Field::Double(v) => type_of(v),
+            Field::Str(v) => type_of(v),
+            Field::Date(v) => type_of(v),
+            Field::TimestampMillis(v) => type_of(v),
+            Field::TimestampMicros(v) => type_of(v),
+            _ => {
+                warn!(
+                    "unaccounted for Field enum variant {:?} - will just assume null",
+                    f
+                );
+                "Null" // Use NullMarker for unknown cases as well
+            }
+        })
+        .collect();
+
+    (row_data, type_data)
 }
 
-// These tests only make sense if there is a real running postgres.
-// So probably better to just have integration tests for this.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -225,7 +316,6 @@ mod tests {
     };
     use anyhow::Result;
     use parquet::file::reader::FileReader;
-    use std::any::type_name;
     use std::collections::HashMap;
     use tokio_postgres::types::Type as PgType;
 
@@ -233,24 +323,29 @@ mod tests {
         ($($x:expr),*) => (vec![$($x.to_string()),*]);
     }
 
-    #[allow(dead_code)]
-    fn type_of<T>(_: T) -> &'static str {
-        type_name::<T>()
-    }
-
-    pub async fn default_db_struct_for_cars_table(table_name: &str) -> Result<Db> {
-        // TODO: create something like:
-        let client = create_table_return_client(table_name.to_string(), "car").await?;
-        Ok(Db {
-            client, // do connection as simply as possible.
-            db_cols: vec_stringify!["model", "num_of_cyl", "miles_per_gallon", "gear"],
-            db_col_types: vec![PgType::VARCHAR, PgType::INT4, PgType::FLOAT8, PgType::INT4],
-            table_name: table_name.to_string(),
-        })
+    pub async fn default_db_struct_for_cars_table(
+        table_name: &str,
+        schema_type: &str,
+    ) -> Result<Db> {
+        let client = create_table_return_client(table_name.to_string(), schema_type).await?;
+        match schema_type {
+            "car" => Ok(Db {
+                client, // do connection as simply as possible.
+                db_cols: vec_stringify!["model", "num_of_cyl", "miles_per_gallon", "gear"],
+                db_col_types: vec![PgType::VARCHAR, PgType::INT4, PgType::FLOAT8, PgType::INT4],
+                table_name: table_name.to_string(),
+            }),
+            // the _ case provides incorrect db types to force failure
+            _ => Ok(Db {
+                client, // do connection as simply as possible.
+                db_cols: vec_stringify!["model", "num_of_cyl", "miles_per_gallon", "gear"],
+                db_col_types: vec![PgType::INT2, PgType::INT2, PgType::FLOAT8, PgType::INT4],
+                table_name: table_name.to_string(),
+            }),
+        }
     }
 
     pub async fn default_db_struct_for_iris_table(table_name: &str) -> Result<Db> {
-        // TODO: create something like:
         let client = create_table_return_client(table_name.to_string(), "iris").await?;
         Ok(Db {
             client, // do connection as simply as possible.
@@ -476,7 +571,9 @@ mod tests {
     async fn test_write_rows_happy_path() -> Result<()> {
         setup_docker();
         let table_name = "test_write_rows_happy_path";
-        let db = default_db_struct_for_cars_table(table_name).await.unwrap();
+        let db = default_db_struct_for_cars_table(table_name, "car")
+            .await
+            .unwrap();
         let (tmp_dir, reader) = parquet_cars_reader().await.unwrap();
         let row_iter: parquet::record::reader::RowIter = reader.get_row_iter(None).unwrap();
 
@@ -495,6 +592,28 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(csv_string, exp_string.to_string());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_write_rows_invalid_db_type() -> Result<()> {
+        setup_docker();
+        let table_name = "test_write_rows_invalid_db_type";
+        let db = default_db_struct_for_cars_table(table_name, "car_incorrect_db_type")
+            .await
+            .unwrap();
+        let (tmp_dir, reader) = parquet_cars_reader().await.unwrap();
+        let row_iter: parquet::record::reader::RowIter = reader.get_row_iter(None).unwrap();
+
+        let col_nums = vec![0, 2, 1, 10];
+        // env_logger::init(); // uncomment for logs during cargo test -- --nocapture
+        let res = db.write_rows(row_iter, &col_nums).await;
+        tmp_dir.close().unwrap(); // can be deleted as read what we need
+        assert!(
+            res.is_err(),
+            "db col 'model' is an incompatible type for the parquet col, so should fail"
+        );
 
         Ok(())
     }

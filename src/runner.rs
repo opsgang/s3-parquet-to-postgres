@@ -233,6 +233,117 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_run_nested_s3_paths() -> Result<()> {
+        let test_name = "test_run_nested_s3_paths";
+        let _env_lock = LOCK_ENV_RUNNER_TESTS.lock().await;
+        let original_env: HashMap<String, String> = env::vars().collect();
+
+        let (tmp_dir, db_client) = runner_tests_setup(test_name, "delivery").await?;
+
+        // env_logger::init(); // uncomment for logs during cargo test -- --nocapture
+        run("config.yml").await?;
+        tmp_dir.close().unwrap(); // can be deleted as read what we need, and we'll verify in db
+        restore_env(original_env);
+
+        // VERIFY DB RESULTS
+        let sql = format!("SELECT count(id) AS total from {}", test_name);
+        let exp_string = "\
+            total\n\
+            14\n\
+        ";
+        let csv_string = get_rows_as_csv_string(&db_client, sql.as_str())
+            .await
+            .unwrap();
+        assert_eq!(
+            csv_string,
+            exp_string.to_string(),
+            "Expected {} rows inserted into the db.",
+            "14",
+        );
+
+        let sql_tmpl = "\
+            (SELECT id FROM {} ORDER BY id ASC LIMIT 2) \
+            UNION ALL \
+            (SELECT id FROM {} ORDER BY id DESC LIMIT 2) \
+            ORDER BY id ASC; \
+        ";
+
+        let sql = render_tmpl_str(sql_tmpl, vec![test_name, test_name]);
+
+        let exp_string = "\
+            id\n\
+            dgS5mQYAAL6DGb2DGQGQZRse42PfgtS8aNdnjwQ=\n\
+            dgS5mQYAANXiGNTiGAGQZRr0me0mxb0dVD3dfkI=\n\
+            dgS5mQYBBPOdGPKdGAGQZxqvsOHBr_RDNe3aVFg=\n\
+            dgS5mQYBBPOdGPKdGAGQZxruMdKhdZ919oxt23U=\n\
+        ";
+
+        let csv_string = get_rows_as_csv_string(&db_client, sql.as_str())
+            .await
+            .unwrap();
+
+        assert_eq!(
+            csv_string,
+            exp_string.to_string(),
+            "Fetched the first two and last two rows from the DB, but didn't get expected results",
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_run_supported_parquet_data_types() -> Result<()> {
+        let test_name = "test_run_supported_parquet_data_types";
+        let _env_lock = LOCK_ENV_RUNNER_TESTS.lock().await;
+        let original_env: HashMap<String, String> = env::vars().collect();
+
+        let (tmp_dir, db_client) = runner_tests_setup(test_name, "types").await?;
+
+        env_logger::init(); // uncomment for logs during cargo test -- --nocapture
+        run("config.yml").await?;
+        tmp_dir.close().unwrap(); // can be deleted as read what we need, and we'll verify in db
+        restore_env(original_env);
+
+        // VERIFY DB RESULTS
+        let sql = format!("SELECT count(id) AS total from {}", test_name);
+        let exp_string = "\
+            total\n\
+            2\n\
+        ";
+        let csv_string = get_rows_as_csv_string(&db_client, sql.as_str())
+            .await
+            .unwrap();
+        assert_eq!(
+            csv_string,
+            exp_string.to_string(),
+            "Expected {} rows inserted into the db.",
+            "2",
+        );
+
+        let sql = format!("SELECT * FROM {} ORDER by my_date_field DESC;", test_name);
+
+        let exp_string = "\
+            id,customer_name,description,some_unsigned_float,some_positive_int,some_fraction\n\
+            1,,\"Eldon Base for stackable storage shelf, platinum\",-213.25,3,0.8\n\
+            2,,\"1.7 Cubic Foot Compact \"\"Cube\"\" Office Refrigerators\",457.81,293,0.58\n\
+            59,,Accessory4,-267.01,5925,0.85\n\
+            60,,Personal Creations� Ink Jet Cards and Labels,3.63,6016,0.36\n\
+        ";
+
+        let csv_string = get_rows_as_csv_string(&db_client, sql.as_str())
+            .await
+            .unwrap();
+
+        assert_eq!(
+            csv_string,
+            exp_string.to_string(),
+            "Should have fetched all rows",
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn test_run_customer_orders_constraint_violation() -> Result<()> {
         let test_name = "test_run_customer_orders_constraint_violation";
         let _env_lock = LOCK_ENV_RUNNER_TESTS.lock().await;

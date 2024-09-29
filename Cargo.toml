@@ -4,25 +4,19 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-# anyhow = "1.0.86"
 anyhow = "1.0.89"
-# aws-config = { version = "1.5.5", features = ["behavior-version-latest"] }
 aws-config = { version = "1.5.6", features = ["behavior-version-latest"] }
-#aws-sdk-s3 = "1.45.0"
 aws-sdk-s3 = "1.51.0"
+chrono = "0.4.38"
 env_logger = "0.11.5"
 futures = "0.3.30"
 log = "0.4.22"
-# parquet = "52.2.0"
 parquet = "53.0.0"
 pin-utils = "0.1.0"
-#serde = { version = "1.0.209", features = ["derive"] }
 serde = { version = "1.0.210", features = ["derive"] }
 serde_yml = "0.0.12"
-#tokio = { version = "1.39.2", features = ["full"] }
 tokio = { version = "1.40.0", features = ["full"] }
-#tokio-postgres = "0.7.11"
-tokio-postgres = "0.7.12"
+tokio-postgres = { version = "0.7.12", features = ["with-chrono-0_4"] }
 
 [dev-dependencies]
 assert_fs = "1.1.2"

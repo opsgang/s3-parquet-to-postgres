@@ -45,6 +45,22 @@ pub mod tests {
                 carb SMALLINT
     "#;
 
+    // parquet data yields i64 type for num of cyls field, not a smallint
+    pub const CARS_INCORRECT_DB_TYPE_COLS_FOR_CREATE: &str = r#"
+                model INT,
+                miles_per_gallon FLOAT8,
+                num_of_cyl SMALLINT,
+                disp FLOAT8,
+                hp INT,
+                drat FLOAT8,
+                wt FLOAT8,
+                qsec FLOAT8,
+                vs SMALLINT,
+                am SMALLINT,
+                gear INT,
+                carb SMALLINT
+    "#;
+
     pub const CUSTOMER_ORDER_COLS_FOR_CREATE: &str = r#"
                 id BIGINT NOT NULL,
                 customer_name VARCHAR (255),
@@ -65,12 +81,25 @@ pub mod tests {
                 some_fraction FLOAT8 NOT NULL
     "#;
 
+    pub const DELIVERIES_COLS_FOR_CREATE: &str = r#"
+               id VARCHAR (255),
+               body TEXT
+    "#;
+
     pub const IRIS_COLS_FOR_CREATE: &str = r#"
                 "sepal.length" FLOAT8,
                 "sepal.width" FLOAT8,
                 "petal.length" FLOAT8,
                 "petal.width" FLOAT8,
-                variety VARCHAR(255)
+                variety VARCHAR (255)
+    "#;
+
+    pub const TYPES_COLS_FOR_CREATE: &str = r#"
+                my_date_field DATE,
+                my_boolean BOOLEAN,
+                my_timestamp_field TIMESTAMP,
+                my_varchar_field VARCHAR (255),
+                my_small_int SMALLINT
     "#;
 
     const LOCALSTACK_PARQUET_DIR: &str = "local/localstack/bucket_data";
@@ -107,12 +136,18 @@ pub mod tests {
         static ref COLS_FOR_CREATE: HashMap<&'static str, &'static str> = {
             let mut m = HashMap::new();
             m.insert("car", CARS_COLS_FOR_CREATE);
+            m.insert(
+                "car_incorrect_db_type",
+                CARS_INCORRECT_DB_TYPE_COLS_FOR_CREATE,
+            );
             m.insert("customer_order", CUSTOMER_ORDER_COLS_FOR_CREATE);
             m.insert(
                 "customer_order_violated_constraint",
                 CUSTOMER_ORDER_VIOLATED_CONSTRAINT_COLS_FOR_CREATE,
             );
+            m.insert("delivery", DELIVERIES_COLS_FOR_CREATE);
             m.insert("iris", IRIS_COLS_FOR_CREATE);
+            m.insert("types", TYPES_COLS_FOR_CREATE);
             m
         };
     }
