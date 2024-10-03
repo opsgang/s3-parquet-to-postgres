@@ -4,6 +4,7 @@ use parquet::file::reader::FileReader;
 
 // don't need crate::cmd_args, as only handles things for binary
 use crate::config;
+use crate::converters;
 use crate::db;
 use crate::parquet_ops;
 use crate::s3_download;
@@ -26,7 +27,10 @@ async fn parquet_rows_to_db(
         let reader = parquet.file_reader()?;
 
         debug!("{}: ... finding desired columns positions", downloaded_file);
-        let parquet_col_nums = parquet.get_desired_cols(&reader)?;
+        let (parquet_col_nums, pq_type_data) = parquet.get_desired_cols(&reader)?;
+
+        // db_col_types should be vec with order of desired fields, as is pq_type_data
+        let _converter_funcs = converters::build(&pq_type_data, &db.db_col_types)?;
 
         debug!("{}: ... reading parquet rows", downloaded_file);
         let row_iter: parquet::record::reader::RowIter = reader.get_row_iter(None)?;

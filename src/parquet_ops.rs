@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Result};
+use parquet::basic::ConvertedType;
 use parquet::file::reader::{FileReader, SerializedFileReader};
 use parquet::schema::types::Type;
 use std::collections::HashMap;
@@ -25,26 +26,34 @@ impl Parquet {
         Ok(reader)
     }
 
-    pub fn get_desired_cols(&mut self, reader: &SerializedFileReader<File>) -> Result<Vec<usize>> {
+    pub fn get_desired_cols(
+        &mut self,
+        reader: &SerializedFileReader<File>,
+    ) -> Result<(Vec<usize>, Vec<(parquet::basic::Type, ConvertedType)>)> {
         let schema: &Type = reader.metadata().file_metadata().schema();
 
         let mut desired_cols: Vec<usize> = Vec::with_capacity(self.desired_fields.len());
+        let mut pq_type_data: Vec<(parquet::basic::Type, ConvertedType)> =
+            Vec::with_capacity(self.desired_fields.len());
 
-        let field_map: &mut HashMap<String, usize> = &mut HashMap::new();
-        Self::map_fields_to_cols(field_map, schema, 0, 0);
+        let field_map: &mut HashMap<String, (usize, parquet::basic::Type, ConvertedType)> =
+            &mut HashMap::new();
+        Self::map_fields_to_parquet_metadata(field_map, schema, 0, 0); // populate field_map with parquet metadata
+
         for field in self.desired_fields.clone() {
-            let col_num = field_map
+            let (col_num, physical_type, converted_type) = field_map
                 .get(&field)
                 .ok_or_else(|| anyhow!("Field '{}' not found in field_map", field))?;
 
             desired_cols.push(*col_num);
+            pq_type_data.push((*physical_type, *converted_type));
         }
 
-        Ok(desired_cols)
+        Ok((desired_cols, pq_type_data))
     }
 
-    fn map_fields_to_cols(
-        field_map: &mut HashMap<String, usize>,
+    fn map_fields_to_parquet_metadata(
+        field_map: &mut HashMap<String, (usize, parquet::basic::Type, ConvertedType)>,
         schema: &Type,
         _depth: usize,
         col_num: usize,
@@ -52,13 +61,22 @@ impl Parquet {
         let name = schema.name();
 
         match schema {
-            Type::PrimitiveType { .. } => field_map.insert(String::from(name), col_num),
-            Type::GroupType { .. } => None,
+            Type::PrimitiveType {
+                basic_info,
+                physical_type,
+                ..
+            } => {
+                field_map.insert(
+                    String::from(name),
+                    (col_num, *physical_type, basic_info.converted_type()),
+                );
+            }
+            Type::GroupType { .. } => {}
         };
 
         if schema.is_group() {
             for (column_num, column) in schema.get_fields().iter().enumerate() {
-                Self::map_fields_to_cols(field_map, column, _depth + 1, column_num);
+                Self::map_fields_to_parquet_metadata(field_map, column, _depth + 1, column_num);
             }
         }
     }
@@ -206,7 +224,8 @@ mod tests {
         tmp_dir.close().unwrap(); // can be deleted as read what we need
 
         assert!(result.is_ok(), "should find variety field in iris.parquet");
-        assert_eq!(result.unwrap(), vec![4, 0]); // can see col order in PARQUET META at end of file
+        let (col_nums, _) = result.unwrap();
+        assert_eq!(col_nums, vec![4, 0]); // can see col order in PARQUET META at end of file
     }
 
     #[test]
@@ -234,7 +253,8 @@ mod tests {
         tmp_dir.close().unwrap(); // can be deleted as read what we need
 
         assert!(result.is_ok(), "should find variety field in iris.parquet");
-        assert_eq!(result.unwrap(), vec![4, 0, 4]); // can see col order in PARQUET META at end of file
+        let (col_nums, _) = result.unwrap();
+        assert_eq!(col_nums, vec![4, 0, 4]); // can see col order in PARQUET META at end of file
     }
 }
 /*

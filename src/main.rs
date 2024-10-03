@@ -2,6 +2,7 @@ use anyhow::Result;
 
 mod cmd_args;
 mod config;
+mod converters;
 mod db;
 mod parquet_ops;
 mod runner;
