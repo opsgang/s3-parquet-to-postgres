@@ -47,13 +47,53 @@ pub fn build<'a>(
             // TODO: add arms for physical -> converted -> db_col_type
             PqType::INT32 => {
                 println!("Found a parquet physical INT32");
+                match converted {
+                    ConvertedType::DATE => {
+                        println!("Found a converted DATE");
+                        match db_col_type {
+                            PgType::DATE => {
+                                println!("Found a PGDATE - should convert and push");
+                                &|_f: Field| -> Box<dyn ToSql + Sync> {
+                                    Box::new(&NullVal) as Box<dyn ToSql + Sync>
+                                }
+                            }
+                            PgType::VARCHAR | PgType::TEXT | PgType::CHAR => {
+                                println!("Found a PG STRING TYPE - should try to push a string");
+                                &|_f: Field| -> Box<dyn ToSql + Sync> {
+                                    Box::new(&NullVal) as Box<dyn ToSql + Sync>
+                                }
+                            }
+                            _ => {
+                                todo!()
+                            }
+                        }
+                    }
+                    ConvertedType::INT_16 => {
+                        println!("Found a converted INT_16"); // smallint
+                        &|_f: Field| -> Box<dyn ToSql + Sync> {
+                            Box::new(&NullVal) as Box<dyn ToSql + Sync>
+                        }
+                    }
+                    ConvertedType::NONE => {
+                        println!("NO CONVERTED TYPE = must be INT32 compatible");
+                        &|_f: Field| -> Box<dyn ToSql + Sync> {
+                            Box::new(&NullVal) as Box<dyn ToSql + Sync>
+                        }
+                    }
+                    _ => {
+                        println!("UNKNOWN CONVERTED TYPE {}", converted);
+                        &|_f: Field| -> Box<dyn ToSql + Sync> {
+                            Box::new(&NullVal) as Box<dyn ToSql + Sync>
+                        }
+                    }
+                }
+            }
+            _ => {
+                // just return v as Box
                 &|_f: Field| -> Box<dyn ToSql + Sync> {
                     Box::new(&NullVal) as Box<dyn ToSql + Sync>
                 }
             }
-            _ => &|_f: Field| -> Box<dyn ToSql + Sync> {
-                Box::new(&NullVal) as Box<dyn ToSql + Sync>
-            },
         };
         converters.push(converter_fn);
     }
