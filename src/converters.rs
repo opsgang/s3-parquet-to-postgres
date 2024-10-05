@@ -35,15 +35,16 @@ impl ToSql for NullVal {
 pub fn build<'a>(
     pq_type_data: &'a [(PqType, ConvertedType)],
     db_col_types: &'a [PgType],
-    converters: &'a mut Vec<&'a dyn Fn(Field) -> Box<dyn ToSql + Sync>>,
-) -> Result<()> {
+) -> Result<Vec<&'a dyn Fn(&Field) -> Box<dyn ToSql + Sync>>> {
+    let mut converters: Vec<&dyn Fn(&Field) -> Box<dyn ToSql + Sync>> =
+        Vec::with_capacity(db_col_types.len());
     for (i, (physical, converted)) in pq_type_data.iter().enumerate() {
         let db_col_type = db_col_types[i].clone();
         println!(
             "{}: P:{:?}, C:{:?}, pg:{:?}",
             i, physical, converted, db_col_types[i]
         );
-        let converter_fn: &dyn Fn(Field) -> Box<dyn ToSql + Sync> = match physical {
+        let converter_fn: &dyn Fn(&Field) -> Box<dyn ToSql + Sync> = match physical {
             // TODO: add arms for physical -> converted -> db_col_type
             PqType::INT32 => {
                 println!("Found a parquet physical INT32");
@@ -53,14 +54,14 @@ pub fn build<'a>(
                         match db_col_type {
                             PgType::DATE => {
                                 println!("Found a PGDATE - should convert and push");
-                                &|_f: Field| -> Box<dyn ToSql + Sync> {
-                                    Box::new(&NullVal) as Box<dyn ToSql + Sync>
+                                &|_f: &Field| -> Box<dyn ToSql + Sync> {
+                                    Box::new(NullVal) as Box<dyn ToSql + Sync>
                                 }
                             }
                             PgType::VARCHAR | PgType::TEXT | PgType::CHAR => {
                                 println!("Found a PG STRING TYPE - should try to push a string");
-                                &|_f: Field| -> Box<dyn ToSql + Sync> {
-                                    Box::new(&NullVal) as Box<dyn ToSql + Sync>
+                                &|_f: &Field| -> Box<dyn ToSql + Sync> {
+                                    Box::new(NullVal) as Box<dyn ToSql + Sync>
                                 }
                             }
                             _ => {
@@ -70,32 +71,33 @@ pub fn build<'a>(
                     }
                     ConvertedType::INT_16 => {
                         println!("Found a converted INT_16"); // smallint
-                        &|_f: Field| -> Box<dyn ToSql + Sync> {
-                            Box::new(&NullVal) as Box<dyn ToSql + Sync>
+                        &|_f: &Field| -> Box<dyn ToSql + Sync> {
+                            Box::new(NullVal) as Box<dyn ToSql + Sync>
                         }
                     }
                     ConvertedType::NONE => {
                         println!("NO CONVERTED TYPE = must be INT32 compatible");
-                        &|_f: Field| -> Box<dyn ToSql + Sync> {
-                            Box::new(&NullVal) as Box<dyn ToSql + Sync>
+                        &|_f: &Field| -> Box<dyn ToSql + Sync> {
+                            Box::new(NullVal) as Box<dyn ToSql + Sync>
                         }
                     }
                     _ => {
                         println!("UNKNOWN CONVERTED TYPE {}", converted);
-                        &|_f: Field| -> Box<dyn ToSql + Sync> {
-                            Box::new(&NullVal) as Box<dyn ToSql + Sync>
+                        &|_f: &Field| -> Box<dyn ToSql + Sync> {
+                            Box::new(NullVal) as Box<dyn ToSql + Sync>
                         }
                     }
                 }
             }
             _ => {
                 // just return v as Box
-                &|_f: Field| -> Box<dyn ToSql + Sync> {
-                    Box::new(&NullVal) as Box<dyn ToSql + Sync>
+                println!("UNKNOWN PHYSICAL TYPE {}", physical);
+                &|_f: &Field| -> Box<dyn ToSql + Sync> {
+                    Box::new(NullVal) as Box<dyn ToSql + Sync>
                 }
             }
         };
         converters.push(converter_fn);
     }
-    Ok(())
+    Ok(converters)
 }

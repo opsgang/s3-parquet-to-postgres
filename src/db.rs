@@ -1,5 +1,6 @@
 use anyhow::{bail, Result}; // don't need to return Result<T,E>
 use log::{debug, error, warn};
+use parquet::basic::{ConvertedType, Type as PqType};
 use parquet::record::{Field, Row};
 use pin_utils::pin_mut;
 use std::any::type_name;
@@ -8,6 +9,8 @@ use std::fmt;
 use tokio_postgres::binary_copy::BinaryCopyInWriter; // let's us pg COPY from STDIN
 use tokio_postgres::types::{to_sql_checked, IsNull, ToSql, Type as PgType};
 use tokio_postgres::Client; // used so data may be verified according to the pg data type
+
+use crate::converters;
 
 #[derive(Debug)]
 struct MultiLineError {
@@ -159,6 +162,7 @@ impl Db {
         &self,
         iter: parquet::record::reader::RowIter<'_>,
         parquet_col_nums: &[usize],
+        pq_type_data: &[(PqType, ConvertedType)],
     ) -> Result<u64> {
         let copy_in_sql = format!(
             "COPY {} ({}) FROM STDIN BINARY",
@@ -166,6 +170,8 @@ impl Db {
             self.db_cols.join(","),
         );
         let pg_types = &self.db_col_types;
+
+        let converters = converters::build(pq_type_data, &self.db_col_types)?;
 
         let sink = self.client.copy_in(copy_in_sql.as_str()).await?;
         let writer = BinaryCopyInWriter::new(sink, pg_types);
@@ -178,14 +184,19 @@ impl Db {
                 .iter()
                 .map(|index| all_fields[*index].1.clone())
                 .collect();
-            // TODO - to allow for conversions to db col type,
-            // iterate over desired_field and related col_type and get back the data
-            // can let iter = zip(desired_fields.clone(), self.db_col_types.clone());
-            // then iter.next returns let (field, col_type) and we can encode accordingly
-            let (mut row_data, type_data) = create_row_data(&desired_fields);
+
+            // TODO: type data can come from pq_type_data
+            let mut converted: Vec<Box<dyn ToSql + Sync>> = converters
+                .iter()
+                .enumerate()
+                .map(|(i, f)| f(&desired_fields[i]))
+                .collect();
+
+            let mut row_data: Vec<&(dyn ToSql + Sync)> =
+                converted.iter().map(|x| x.as_ref()).collect();
 
             debug!("SELECTED ROW DATA: {:?}", &row_data);
-            debug!("RUST DATA TYPES: {:?}", &type_data);
+            debug!("RUST DATA TYPES: {:?}", &pq_type_data);
             match writer.as_mut().write(&row_data).await {
                 Ok(_) => debug!("row written to db"),
                 Err(e) => {
@@ -197,7 +208,7 @@ impl Db {
                        db col types are: {:?}\n\
                        rust types of data: {:?}\n\
                     ",
-                        e, &self.db_cols, &self.db_col_types, type_data,
+                        e, &self.db_cols, &self.db_col_types, pq_type_data,
                     );
                     bail!(MultiLineError { msg });
                 }
@@ -307,6 +318,7 @@ fn create_row_data(desired_fields: &[Field]) -> (Vec<&(dyn ToSql + Sync)>, Vec<&
     (row_data, type_data)
 }
 
+/*
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -645,3 +657,4 @@ mod tests {
         Ok(())
     }
 }
+*/

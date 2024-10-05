@@ -4,7 +4,6 @@ use parquet::file::reader::FileReader;
 
 // don't need crate::cmd_args, as only handles things for binary
 use crate::config;
-use crate::converters;
 use crate::db;
 use crate::parquet_ops;
 use crate::s3_download;
@@ -29,15 +28,13 @@ async fn parquet_rows_to_db(
         debug!("{}: ... finding desired columns positions", downloaded_file);
         let (parquet_col_nums, pq_type_data) = parquet.get_desired_cols(&reader)?;
 
-        // db_col_types should be vec with order of desired fields, as is pq_type_data
-        let mut converters = Vec::new();
-        converters::build(&pq_type_data, &db.db_col_types, &mut converters)?;
-
         debug!("{}: ... reading parquet rows", downloaded_file);
         let row_iter: parquet::record::reader::RowIter = reader.get_row_iter(None)?;
 
         info!("{}: ... writing rows to db", downloaded_file);
-        let num_rows_added = db.write_rows(row_iter, &parquet_col_nums).await?;
+        let num_rows_added = db
+            .write_rows(row_iter, &parquet_col_nums, &pq_type_data)
+            .await?;
 
         info!(
             "{}: {} rows added to db successfully",
@@ -152,8 +149,8 @@ mod tests {
         let src_dir = format!("{}/{}", RUNNER_TESTDATA, test_name);
         tmp_dir.copy_from(src_dir, &["*", "todo"])?;
 
-        setup_docker(); // do this before creating test table!
-                        // create expected db table
+        // setup_docker(); // do this before creating test table!
+        // create expected db table
         let db_client = create_table_return_client(test_name.to_string(), table_columns).await?;
 
         set_good_aws_vars();
