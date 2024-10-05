@@ -32,6 +32,18 @@ impl ToSql for NullVal {
     to_sql_checked!();
 }
 
+/*
+https://arrow.apache.org/rust/parquet/basic/enum.Type.html
+https://arrow.apache.org/rust/parquet/basic/enum.ConvertedType.html
+
+PHYSICAL    CONVERTED   Field::
+INT32       INT_16      Short
+INT32       DATE        Date
+INT32       NONE        Int
+BYTE_ARRAY  UTF8        Str
+
+*/
+
 pub fn build<'a>(
     pq_type_data: &'a [(PqType, ConvertedType)],
     db_col_types: &'a [PgType],
@@ -92,8 +104,23 @@ pub fn build<'a>(
             _ => {
                 // just return v as Box
                 println!("UNKNOWN PHYSICAL TYPE {}", physical);
-                &|_f: &Field| -> Box<dyn ToSql + Sync> {
-                    Box::new(NullVal) as Box<dyn ToSql + Sync>
+                &|f: &Field| -> Box<dyn ToSql + Sync> {
+                    match *f {
+                        Field::Null => Box::new(NullVal) as Box<dyn ToSql + Sync>, // Use NullMarker for NULL values
+                        Field::Bool(v) => Box::new(v) as Box<dyn ToSql + Sync>,
+                        Field::Byte(v) => Box::new(v) as Box<dyn ToSql + Sync>,
+                        Field::Short(v) => Box::new(v) as Box<dyn ToSql + Sync>,
+                        Field::Int(v) => Box::new(v) as Box<dyn ToSql + Sync>,
+                        Field::Long(v) => Box::new(v) as Box<dyn ToSql + Sync>,
+                        Field::UInt(v) => Box::new(v) as Box<dyn ToSql + Sync>,
+                        Field::Float(v) => Box::new(v) as Box<dyn ToSql + Sync>,
+                        Field::Double(v) => Box::new(v) as Box<dyn ToSql + Sync>,
+                        Field::Str(ref v) => Box::new(v.clone()) as Box<dyn ToSql + Sync>,
+                        _ => {
+                            println!("NOT IMPLEMENTED - will return Null");
+                            Box::new(NullVal) as Box<dyn ToSql + Sync>
+                        }
+                    }
                 }
             }
         };

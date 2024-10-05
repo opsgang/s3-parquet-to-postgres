@@ -149,8 +149,8 @@ mod tests {
         let src_dir = format!("{}/{}", RUNNER_TESTDATA, test_name);
         tmp_dir.copy_from(src_dir, &["*", "todo"])?;
 
-        // setup_docker(); // do this before creating test table!
-        // create expected db table
+        setup_docker(); // do this before creating test table!
+                        // create expected db table
         let db_client = create_table_return_client(test_name.to_string(), table_columns).await?;
 
         set_good_aws_vars();
