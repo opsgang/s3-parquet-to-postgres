@@ -30,7 +30,8 @@ async fn parquet_rows_to_db(
         let (parquet_col_nums, pq_type_data) = parquet.get_desired_cols(&reader)?;
 
         // db_col_types should be vec with order of desired fields, as is pq_type_data
-        let _converter_funcs = converters::build(&pq_type_data, &db.db_col_types)?;
+        let mut converters = Vec::new();
+        converters::build(&pq_type_data, &db.db_col_types, &mut converters)?;
 
         debug!("{}: ... reading parquet rows", downloaded_file);
         let row_iter: parquet::record::reader::RowIter = reader.get_row_iter(None)?;
