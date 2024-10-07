@@ -1,0 +1,3 @@
+my_date_field,my_boolean,my_timestamp_field,my_varchar_field,my_small_int,my_int,my_big_int
+"24/09/2024","true","24/09/2024 10:15:30.012","this is my varchar","2","4","6"
+"01/08/2024","false","02/08/2022 09:21:01.123","this is NOT my varchar","3","5","7"

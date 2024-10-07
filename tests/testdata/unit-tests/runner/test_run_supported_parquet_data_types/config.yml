@@ -19,6 +19,8 @@ parquet:
     - my_timestamp_field
     - my_varchar_field
     - my_small_int
+    - my_int
+    - my_big_int
 
 work_lists:
   dir: "work" # assumes binary is run from repo root dir

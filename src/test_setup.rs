@@ -11,6 +11,7 @@
 pub mod tests {
     use anyhow::{bail, Result};
     use assert_fs::{fixture::TempDir, prelude::*};
+    use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
     use const_format::formatcp;
     use csv::WriterBuilder;
     use lazy_static::lazy_static;
@@ -19,6 +20,7 @@ pub mod tests {
     use parquet::file::reader::SerializedFileReader;
     use std::collections::HashMap;
     use std::env;
+    use std::fmt::Write;
     use std::fs::File;
     use std::io::Cursor;
     use std::path::Path;
@@ -26,7 +28,7 @@ pub mod tests {
     use tokio::fs;
     use tokio::io::AsyncReadExt;
     use tokio_postgres::Client;
-
+    use tokio_postgres::Row as PgRow;
     pub const GOOD_DB_CONN_STR: &str =
         "host=127.0.0.1 user=postgres password=postgres dbname=testing";
 
@@ -102,6 +104,16 @@ pub mod tests {
                 my_small_int SMALLINT
     "#;
 
+    pub const TYPES_FULL_COLS_FOR_CREATE: &str = r#"
+                my_date_field DATE,
+                my_boolean BOOLEAN,
+                my_timestamp_field TIMESTAMP,
+                my_varchar_field VARCHAR (255),
+                my_small_int SMALLINT,
+                my_int INT,
+                my_big_int BIGINT
+    "#;
+
     const LOCALSTACK_PARQUET_DIR: &str = "local/localstack/bucket_data";
 
     pub static LOCALSTACK_PARQUET_DIR_CARS: &str = formatcp!(
@@ -148,6 +160,7 @@ pub mod tests {
             m.insert("delivery", DELIVERIES_COLS_FOR_CREATE);
             m.insert("iris", IRIS_COLS_FOR_CREATE);
             m.insert("types", TYPES_COLS_FOR_CREATE);
+            m.insert("types_full", TYPES_FULL_COLS_FOR_CREATE);
             m
         };
     }
@@ -280,7 +293,7 @@ pub mod tests {
     }
 
     // we use full type spec for row or compiler will think this is a parquet record row
-    fn get_value_as_string(row: &tokio_postgres::Row, idx: usize) -> Result<String> {
+    fn get_value_as_string(row: &PgRow, idx: usize) -> Result<String> {
         let column_type = row.columns()[idx].type_();
         let value_str = match *column_type {
             // Handle integers
@@ -312,8 +325,30 @@ pub mod tests {
                 .get::<_, Option<bool>>(idx)
                 .map_or("".to_string(), |v| v.to_string()),
 
+            // Handle date
+            tokio_postgres::types::Type::DATE => row
+                .get::<_, Option<NaiveDate>>(idx)
+                .map_or("".to_string(), |v| v.format("%Y-%m-%d").to_string()),
+
+            // Handle timestamp (without time zone)
+            tokio_postgres::types::Type::TIMESTAMP => row
+                .get::<_, Option<NaiveDateTime>>(idx)
+                .map_or("".to_string(), |v| {
+                    v.format("%Y-%m-%d %H:%M:%S").to_string()
+                }),
+
+            // Handle timestamp with time zone
+            tokio_postgres::types::Type::TIMESTAMPTZ => row
+                .get::<_, Option<DateTime<Utc>>>(idx)
+                .map_or("".to_string(), |v| {
+                    v.format("%Y-%m-%d %H:%M:%S %Z").to_string()
+                }),
+
             // Fallback for other types
-            _ => "".to_string(),
+            _ => {
+                debug!("Haven't got match arm for this tokio_postgres::types::Type for printing");
+                "".to_string() // also accounts for null values in a csv string (is empty string)
+            }
         };
 
         Ok(value_str)

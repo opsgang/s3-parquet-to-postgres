@@ -1,4 +1,6 @@
-test.csv:
+/tmp/test.csv:
+
+See also local/localstack/bucket_data/types-parquet/full.csv
 
 ```csv
 my_date_field,my_boolean,my_timestamp_field,my_varchar_field,my_small_int
@@ -6,6 +8,8 @@ my_date_field,my_boolean,my_timestamp_field,my_varchar_field,my_small_int
 "01/08/2024","false","02/08/2022 09:21:01.123","this is NOT my varchar","3"
 ```
 
+Note that the timestamp field created is MICROS
+TODO: try with other TIMESTAMP configurations
 ```sql
 CREATE TABLE test_parquet (
   my_date_field DATE,
@@ -16,5 +20,8 @@ CREATE TABLE test_parquet (
 ) ;
 COPY test_parquet FROM 'test.csv' WITH (timestampformat '%d/%m/%Y %H:%M:%S.%g');
 
+SELECT * FROM test_parquet;
+
 COPY (SELECT * from test_parquet) TO 'test.parquet' (FORMAT 'parquet');
+.exit
 ```

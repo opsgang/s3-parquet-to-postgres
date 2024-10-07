@@ -149,8 +149,8 @@ mod tests {
         let src_dir = format!("{}/{}", RUNNER_TESTDATA, test_name);
         tmp_dir.copy_from(src_dir, &["*", "todo"])?;
 
-        setup_docker(); // do this before creating test table!
-                        // create expected db table
+        // setup_docker(); // do this before creating test table!
+        // create expected db table
         let db_client = create_table_return_client(test_name.to_string(), table_columns).await?;
 
         set_good_aws_vars();
@@ -299,7 +299,7 @@ mod tests {
         let _env_lock = LOCK_ENV_RUNNER_TESTS.lock().await;
         let original_env: HashMap<String, String> = env::vars().collect();
 
-        let (tmp_dir, db_client) = runner_tests_setup(test_name, "types").await?;
+        let (tmp_dir, db_client) = runner_tests_setup(test_name, "types_full").await?;
 
         env_logger::init(); // uncomment for logs during cargo test -- --nocapture
         run("config.yml").await?;
@@ -307,29 +307,25 @@ mod tests {
         restore_env(original_env);
 
         // VERIFY DB RESULTS
-        let sql = format!("SELECT count(id) AS total from {}", test_name);
-        let exp_string = "\
-            total\n\
-            2\n\
-        ";
+        let sql = format!("SELECT count(*) AS total from {}", test_name);
+        let exp_count = 2;
+        let exp_count_string = format!("total\n{}\n", exp_count);
         let csv_string = get_rows_as_csv_string(&db_client, sql.as_str())
             .await
             .unwrap();
         assert_eq!(
             csv_string,
-            exp_string.to_string(),
+            exp_count_string.to_string(),
             "Expected {} rows inserted into the db.",
-            "2",
+            exp_count,
         );
 
-        let sql = format!("SELECT * FROM {} ORDER by my_date_field DESC;", test_name);
+        let sql = format!("SELECT * FROM {} ORDER BY my_date_field DESC", test_name);
 
-        let exp_string = "\
-            id,customer_name,description,some_unsigned_float,some_positive_int,some_fraction\n\
-            1,,\"Eldon Base for stackable storage shelf, platinum\",-213.25,3,0.8\n\
-            2,,\"1.7 Cubic Foot Compact \"\"Cube\"\" Office Refrigerators\",457.81,293,0.58\n\
-            59,,Accessory4,-267.01,5925,0.85\n\
-            60,,Personal Creations� Ink Jet Cards and Labels,3.63,6016,0.36\n\
+        let exp_csv_string = "\
+            my_date_field,my_boolean,my_timestamp_field,my_varchar_field,my_small_int\n\
+            2024-09-24,true,,this is my varchar,2\n\
+            2024-08-01,false,,this is NOT my varchar,3\n\
         ";
 
         let csv_string = get_rows_as_csv_string(&db_client, sql.as_str())
@@ -338,7 +334,7 @@ mod tests {
 
         assert_eq!(
             csv_string,
-            exp_string.to_string(),
+            exp_csv_string.to_string(),
             "Should have fetched all rows",
         );
 
