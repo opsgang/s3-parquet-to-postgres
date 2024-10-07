@@ -1,16 +1,16 @@
 use anyhow::{bail, Result}; // don't need to return Result<T,E>
-use log::{debug, error, warn};
-use parquet::basic::{ConvertedType, Type as PqType};
-use parquet::record::{Field, Row};
+use log::{debug, error};
+use parquet::record::Row;
 use pin_utils::pin_mut;
 use std::any::type_name;
 use std::collections::HashMap;
 use std::fmt;
 use tokio_postgres::binary_copy::BinaryCopyInWriter; // let's us pg COPY from STDIN
-use tokio_postgres::types::{to_sql_checked, IsNull, ToSql, Type as PgType};
+use tokio_postgres::types::{ToSql, Type as PgType};
 use tokio_postgres::Client; // used so data may be verified according to the pg data type
 
 use crate::converters;
+use crate::parquet_ops::PqTypeData;
 
 #[derive(Debug)]
 struct MultiLineError {
@@ -29,6 +29,7 @@ impl fmt::Display for MultiLineError {
 
 impl std::error::Error for MultiLineError {}
 
+#[allow(dead_code)]
 fn type_of<T>(_: T) -> &'static str {
     type_name::<T>()
 }
@@ -108,7 +109,6 @@ impl Db {
         // It's useful when the db col name differs from the parquet field name.
         // e.g. when parquet field name has characters not allowed in a db column name.
         // Default assumes db col has same name as parquet field.
-
         // For each desired parquet field use alias if defined, or else use parquet field name
         let db_cols: Vec<String> = match parquet_to_db {
             None => parquet_fields.clone(),
@@ -152,7 +152,7 @@ impl Db {
         })
     }
 
-    // Because of the need for pin_mut!, we have to create the following in the same scope:
+    // We want the safety provided by pin_mut!, so we create the following in the same scope:
     // * sink (filehandle) for copy in
     // * writer object
     // * pin_mut'ed writer (fixed mem address for its lifetime, but rust will still allow mutability)
@@ -162,7 +162,7 @@ impl Db {
         &self,
         iter: parquet::record::reader::RowIter<'_>,
         parquet_col_nums: &[usize],
-        pq_type_data: &[(PqType, ConvertedType)],
+        pq_type_data: &[PqTypeData],
     ) -> Result<u64> {
         let copy_in_sql = format!(
             "COPY {} ({}) FROM STDIN BINARY",
@@ -186,11 +186,13 @@ impl Db {
                 .collect();
 
             // TODO: type data can come from pq_type_data
-            let mut converted: Vec<Box<dyn ToSql + Sync>> = converters
+            let converted: Vec<Box<dyn ToSql + Sync>> = converters
                 .iter()
                 .enumerate()
                 .map(|(i, f)| f(&desired_fields[i]))
                 .collect();
+
+            debug!("converted data:<<{:?}>>", converted);
 
             let mut row_data: Vec<&(dyn ToSql + Sync)> =
                 converted.iter().map(|x| x.as_ref()).collect();
@@ -238,87 +240,6 @@ impl Db {
     }
 }
 
-#[derive(Debug)]
-struct NullMarker;
-
-impl ToSql for NullMarker {
-    fn to_sql(
-        &self,
-        _ty: &tokio_postgres::types::Type,
-        _buf: &mut tokio_postgres::types::private::BytesMut,
-    ) -> Result<IsNull, Box<dyn std::error::Error + Sync + Send>> {
-        Ok(IsNull::Yes) // Represents NULL in PostgreSQL
-    }
-
-    fn accepts(_ty: &tokio_postgres::types::Type) -> bool {
-        true // Accept any type
-    }
-
-    to_sql_checked!();
-}
-
-// TODO: need lookup of db_col_name to { 'parquet_col_type', 'db_col_type' }?
-// Or in outerloop that calls this, pass this func the required params instead of a hashmap
-fn create_row_data(desired_fields: &[Field]) -> (Vec<&(dyn ToSql + Sync)>, Vec<&str>) {
-    let null_marker = &NullMarker;
-
-    // TODO???: use Iterator::unzip https://users.rust-lang.org/t/collect-vec-of-tuples-into-two-vecs/63407
-    let row_data: Vec<&(dyn ToSql + Sync)> = desired_fields
-        .iter()
-        .map(|f| match f {
-            Field::Null => null_marker as &(dyn ToSql + Sync), // Use NullMarker for NULL values
-            Field::Bool(v) => v as &(dyn ToSql + Sync),
-            Field::Byte(v) => v as &(dyn ToSql + Sync),
-            Field::Short(v) => v as &(dyn ToSql + Sync),
-            Field::Int(v) => v as &(dyn ToSql + Sync),
-            Field::Long(v) => v as &(dyn ToSql + Sync),
-            Field::UInt(v) => v as &(dyn ToSql + Sync),
-            Field::Float(v) => v as &(dyn ToSql + Sync),
-            Field::Double(v) => v as &(dyn ToSql + Sync),
-            Field::Str(v) => v as &(dyn ToSql + Sync),
-            Field::Date(v) => {
-                // CONVERT v if needed
-                v as &(dyn ToSql + Sync)
-            }
-            Field::TimestampMillis(v) => v as &(dyn ToSql + Sync),
-            Field::TimestampMicros(v) => v as &(dyn ToSql + Sync),
-            _ => {
-                warn!("ToSQL not implemented for Field enum variant {:?}", f);
-                null_marker // Use NullMarker for unknown cases as well
-            }
-        })
-        .collect();
-
-    let type_data: Vec<&str> = desired_fields
-        .iter()
-        .map(|f| match f {
-            Field::Null => "Null", // Use NullMarker for NULL values
-            Field::Bool(v) => type_of(v),
-            Field::Byte(v) => type_of(v),
-            Field::Short(v) => type_of(v),
-            Field::Int(v) => type_of(v),
-            Field::Long(v) => type_of(v),
-            Field::UInt(v) => type_of(v),
-            Field::Float(v) => type_of(v),
-            Field::Double(v) => type_of(v),
-            Field::Str(v) => type_of(v),
-            Field::Date(v) => type_of(v),
-            Field::TimestampMillis(v) => type_of(v),
-            Field::TimestampMicros(v) => type_of(v),
-            _ => {
-                warn!(
-                    "unaccounted for Field enum variant {:?} - will just assume null",
-                    f
-                );
-                "Null" // Use NullMarker for unknown cases as well
-            }
-        })
-        .collect();
-
-    (row_data, type_data)
-}
-
-/*
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -327,6 +248,7 @@ mod tests {
         parquet_iris_reader, setup_docker, GOOD_DB_CONN_STR,
     };
     use anyhow::Result;
+    use parquet::basic::{ConvertedType, Type as PqType};
     use parquet::file::reader::FileReader;
     use std::collections::HashMap;
     use tokio_postgres::types::Type as PgType;
@@ -587,10 +509,21 @@ mod tests {
             .await
             .unwrap();
         let (tmp_dir, reader) = parquet_cars_reader().await.unwrap();
+
         let row_iter: parquet::record::reader::RowIter = reader.get_row_iter(None).unwrap();
 
+        // PQ cols:     model       cyl         mpg         gear
+        // col no.      0           2           1           10
+        // types:       BYTE_ARRAY  INT32       DOUBLE      INT32
+        // converted:   UTF8        NONE|INT_32 NONE        NONE|INT_32
         let col_nums = vec![0, 2, 1, 10];
-        let num_rows_added = db.write_rows(row_iter, &col_nums).await?;
+        let pq_data: &[PqTypeData] = &[
+            (PqType::BYTE_ARRAY, ConvertedType::UTF8),
+            (PqType::INT32, ConvertedType::INT_32),
+            (PqType::DOUBLE, ConvertedType::NONE),
+            (PqType::INT32, ConvertedType::NONE),
+        ];
+        let num_rows_added = db.write_rows(row_iter, &col_nums, pq_data).await?;
         tmp_dir.close().unwrap(); // can be deleted as read what we need
 
         assert_eq!(num_rows_added, 32);
@@ -608,53 +541,54 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
-    async fn test_write_rows_invalid_db_type() -> Result<()> {
-        setup_docker();
-        let table_name = "test_write_rows_invalid_db_type";
-        let db = default_db_struct_for_cars_table(table_name, "car_incorrect_db_type")
-            .await
-            .unwrap();
-        let (tmp_dir, reader) = parquet_cars_reader().await.unwrap();
-        let row_iter: parquet::record::reader::RowIter = reader.get_row_iter(None).unwrap();
+    /*
+        #[tokio::test]
+        async fn test_write_rows_invalid_db_type() -> Result<()> {
+            setup_docker();
+            let table_name = "test_write_rows_invalid_db_type";
+            let db = default_db_struct_for_cars_table(table_name, "car_incorrect_db_type")
+                .await
+                .unwrap();
+            let (tmp_dir, reader) = parquet_cars_reader().await.unwrap();
+            let row_iter: parquet::record::reader::RowIter = reader.get_row_iter(None).unwrap();
 
-        let col_nums = vec![0, 2, 1, 10];
-        // env_logger::init(); // uncomment for logs during cargo test -- --nocapture
-        let res = db.write_rows(row_iter, &col_nums).await;
-        tmp_dir.close().unwrap(); // can be deleted as read what we need
-        assert!(
-            res.is_err(),
-            "db col 'model' is an incompatible type for the parquet col, so should fail"
-        );
+            let col_nums = vec![0, 2, 1, 10];
+            // env_logger::init(); // uncomment for logs during cargo test -- --nocapture
+            let res = db.write_rows(row_iter, &col_nums).await;
+            tmp_dir.close().unwrap(); // can be deleted as read what we need
+            assert!(
+                res.is_err(),
+                "db col 'model' is an incompatible type for the parquet col, so should fail"
+            );
 
-        Ok(())
-    }
+            Ok(())
+        }
 
-    #[tokio::test]
-    async fn test_write_rows_quoted_db_cols_happy_path() -> Result<()> {
-        setup_docker();
-        let table_name = "test_write_rows_quoted_db_cols_happy_path";
-        let db = default_db_struct_for_iris_table(table_name).await.unwrap();
-        let (tmp_dir, reader) = parquet_iris_reader().await.unwrap();
-        let row_iter: parquet::record::reader::RowIter = reader.get_row_iter(None).unwrap();
+        #[tokio::test]
+        async fn test_write_rows_quoted_db_cols_happy_path() -> Result<()> {
+            setup_docker();
+            let table_name = "test_write_rows_quoted_db_cols_happy_path";
+            let db = default_db_struct_for_iris_table(table_name).await.unwrap();
+            let (tmp_dir, reader) = parquet_iris_reader().await.unwrap();
+            let row_iter: parquet::record::reader::RowIter = reader.get_row_iter(None).unwrap();
 
-        let col_nums = vec![4, 0, 1]; // col numbers in parquet, in the order we write the data
-        let num_rows_added = db.write_rows(row_iter, &col_nums).await?;
-        tmp_dir.close().unwrap(); // can be deleted as read what we need
+            let col_nums = vec![4, 0, 1]; // col numbers in parquet, in the order we write the data
+            let num_rows_added = db.write_rows(row_iter, &col_nums).await?;
+            tmp_dir.close().unwrap(); // can be deleted as read what we need
 
-        assert_eq!(num_rows_added, 150);
-        let sql = format!("SELECT * from {} ORDER by variety DESC LIMIT 2", table_name);
-        let exp_string = "\
-            sepal.length,sepal.width,petal.length,petal.width,variety\n\
-            6.3,3.3,,,Virginica\n\
-            5.8,2.7,,,Virginica\n\
-        ";
-        let csv_string = get_rows_as_csv_string(&db.client, sql.as_str())
-            .await
-            .unwrap();
-        assert_eq!(csv_string, exp_string.to_string());
+            assert_eq!(num_rows_added, 150);
+            let sql = format!("SELECT * from {} ORDER by variety DESC LIMIT 2", table_name);
+            let exp_string = "\
+                sepal.length,sepal.width,petal.length,petal.width,variety\n\
+                6.3,3.3,,,Virginica\n\
+                5.8,2.7,,,Virginica\n\
+            ";
+            let csv_string = get_rows_as_csv_string(&db.client, sql.as_str())
+                .await
+                .unwrap();
+            assert_eq!(csv_string, exp_string.to_string());
 
-        Ok(())
-    }
+            Ok(())
+        }
+    */
 }
-*/

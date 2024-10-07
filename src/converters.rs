@@ -1,11 +1,17 @@
-use anyhow::{anyhow, bail, Result};
+use anyhow::Result;
 use chrono::NaiveDate;
+use log::{debug, error};
 use parquet::basic::{ConvertedType, Type as PqType};
 use parquet::record::Field;
-use parquet::schema::types::Type;
 use tokio_postgres::types::{to_sql_checked, IsNull, ToSql, Type as PgType};
 
-static NAIVE_EPOCH: NaiveDate = NaiveDate::from_ymd(1970, 1, 1);
+const NAIVE_EPOCH: NaiveDate = match NaiveDate::from_ymd_opt(1970, 1, 1) {
+    Some(naive_epoch) => naive_epoch,
+    None => panic!("Invalid date for epoch"),
+};
+
+type ConverterFn = dyn Fn(&Field) -> Box<dyn ToSql + Sync>;
+type Converters<'a> = Vec<&'a ConverterFn>;
 
 fn parquet_date_to_naive_date(parquet_date: i32) -> NaiveDate {
     // The Unix epoch date is 1970-01-01
@@ -42,28 +48,24 @@ Also see https://github.com/adriangb/pgpq?tab=readme-ov-file#data-type-support
 PG Types: https://github.com/sfackler/rust-postgres/blob/master/postgres-types/src/lib.rs#L461-L512
 
 PHYSICAL    CONVERTED   PQField::   Allowed PG types
-BOOL        BOOL        Bool        *BOOL, VARCHAR|TEXT|CHAR, SMALLINT (1 or 0)
-BOOL        NONE        Bool        *BOOL, VARCHAR|TEXT|CHAR, SMALLINT (1 or 0)
+BOOL        BOOL        Bool        *BOOL, VARCHAR|TEXT|BPCHAR, SMALLINT (1 or 0)
+BOOL        NONE        Bool        *BOOL, VARCHAR|TEXT|BPCHAR, SMALLINT (1 or 0)
 INT32       INT_8       Byte        *INT2|SMALLINT(i16), INT|INT4(i32), BIGINT|INT8(i64)
 INT32       INT_16      Short       *INT2|SMALLINT(i16), INT|INT4(i32), BIGINT|INT8(i64)
-INT32       DATE        Date        *DATE, INT|INT4(i32), BIGINT|INT8(i64), VARCHAR|TEXT|CHAR(>10) assumes YYYY-mm-dd
+INT32       DATE        Date        *DATE, INT|INT4(i32), BIGINT|INT8(i64), VARCHAR|TEXT|BPCHAR assumes YYYY-mm-dd
 INT32       INT_32      Int
 INT32       NONE        Int         *INT|INT4(i32), BIGINT|INT8(i64)
 BYTE_ARRAY  UTF8        Str         *VARCHAR|TEXT|CHAR(>0)
 */
 
-fn p_int32<'a>(
-    converted: &'a ConvertedType,
-    db_col_type: &PgType,
-) -> &'a dyn Fn(&Field) -> Box<dyn ToSql + Sync> {
+// INT32: https://github.com/apache/arrow-rs/blob/master/parquet/src/record/api.rs#L1025-L1060
+fn p_int32<'a>(converted: &'a ConvertedType, db_col_type: &PgType) -> &'a ConverterFn {
     println!("Found a parquet physical INT32");
     match *converted {
-        ConvertedType::DATE => p_int32_c_date(converted, db_col_type), // parquet date
-        ConvertedType::INT_16 => p_int32_c_int_16(converted, db_col_type), // parquet smallint/short
-        ConvertedType::NONE => {
-            println!("NO CONVERTED TYPE = must be INT32 compatible");
-            &|_f: &Field| -> Box<dyn ToSql + Sync> { Box::new(NullVal) as Box<dyn ToSql + Sync> }
-        }
+        ConvertedType::DATE => field_is_date(converted, db_col_type), // parquet date
+        ConvertedType::INT_16 => field_is_short(converted, db_col_type), // parquet smallint/short
+        ConvertedType::NONE | ConvertedType::INT_32 => field_is_int(converted, db_col_type),
+
         _ => {
             println!("UNKNOWN CONVERTED TYPE {}", converted);
             &|_f: &Field| -> Box<dyn ToSql + Sync> { Box::new(NullVal) as Box<dyn ToSql + Sync> }
@@ -71,15 +73,107 @@ fn p_int32<'a>(
     }
 }
 
-fn p_int32_c_int_16<'a>(
-    _converted: &'a ConvertedType,
-    db_col_type: &PgType,
-) -> &'a dyn Fn(&Field) -> Box<dyn ToSql + Sync> {
-    println!("Found a converted INT16 (Short)");
+// BYTE_ARRAY: https://github.com/apache/arrow-rs/blob/master/parquet/src/record/api.rs#L725-L737
+fn p_byte_array<'a>(converted: &'a ConvertedType, db_col_type: &PgType) -> &'a ConverterFn {
+    println!("Found a physical BYTE_ARRAY");
+    match *converted {
+        ConvertedType::UTF8 | ConvertedType::ENUM | ConvertedType::JSON => {
+            field_is_str(converted, db_col_type)
+        }
+        ConvertedType::NONE | ConvertedType::BSON => field_is_bytes(converted, db_col_type),
+        ConvertedType::DECIMAL => field_is_decimal(converted, db_col_type),
+        _ => {
+            println!("UNHANDLED CONVERTED TYPE {}, will use NULL", converted);
+            &|_f: &Field| -> Box<dyn ToSql + Sync> { Box::new(NullVal) as Box<dyn ToSql + Sync> }
+        }
+    }
+}
+
+fn field_is_bytes<'a>(_converted: &'a ConvertedType, db_col_type: &PgType) -> &'a ConverterFn {
+    println!("Found an unconverted BYTE_ARRAY or converted BSON (BYTE_ARRAY)");
+    match *db_col_type {
+        _ => {
+            todo!()
+        }
+    }
+}
+
+fn field_is_decimal<'a>(_converted: &'a ConvertedType, db_col_type: &PgType) -> &'a ConverterFn {
+    println!("Found a converted DECIMAL");
+    match *db_col_type {
+        PgType::FLOAT4 => &|f: &Field| -> Box<dyn ToSql + Sync> {
+            match f {
+                Field::Decimal(v) => Box::new(NullVal) as Box<dyn ToSql + Sync>,
+                _ => Box::new(NullVal) as Box<dyn ToSql + Sync>,
+            }
+        },
+        _ => {
+            todo!()
+        }
+    }
+}
+
+// TODO: we don't actually know that postgres crate will do the conversions from each of these types
+// to an acceptable type for writing to the db ...
+// Need to create test with every single type with incoming string data to check
+fn pgtype_accepts_str(pgtype: &PgType) -> bool {
+    matches!(
+        *pgtype,
+        PgType::BPCHAR
+            | PgType::CHAR
+            | PgType::TEXT
+            | PgType::DATE
+            | PgType::TIMESTAMP
+            | PgType::TIMESTAMPTZ
+            | PgType::VARCHAR
+            | PgType::UNKNOWN
+            | PgType::INET
+            | PgType::CIDR
+    )
+}
+
+fn field_is_str<'a>(_converted: &'a ConvertedType, db_col_type: &PgType) -> &'a ConverterFn {
+    println!("Found a UTF8 (Str)");
+    match db_col_type {
+        _ if pgtype_accepts_str(db_col_type) => &|f: &Field| -> Box<dyn ToSql + Sync> {
+            match f {
+                Field::Str(ref v) => Box::new(v.clone()) as Box<dyn ToSql + Sync>,
+                _ => Box::new(NullVal) as Box<dyn ToSql + Sync>,
+            }
+        },
+        _ => {
+            todo!()
+        }
+    }
+}
+
+fn field_is_int<'a>(_converted: &'a ConvertedType, db_col_type: &PgType) -> &'a ConverterFn {
+    println!("Found an INT32 (Short)");
+    match *db_col_type {
+        PgType::INT4 => &|f: &Field| -> Box<dyn ToSql + Sync> {
+            match f {
+                Field::Int(v) => Box::new(*v) as Box<dyn ToSql + Sync>,
+                _ => Box::new(NullVal) as Box<dyn ToSql + Sync>,
+            }
+        },
+        PgType::INT8 => &|f: &Field| -> Box<dyn ToSql + Sync> {
+            match f {
+                Field::Int(v) => Box::new(*v as i64) as Box<dyn ToSql + Sync>,
+                _ => Box::new(NullVal) as Box<dyn ToSql + Sync>,
+            }
+        },
+        _ => {
+            todo!()
+        }
+    }
+}
+
+fn field_is_short<'a>(_converted: &'a ConvertedType, db_col_type: &PgType) -> &'a ConverterFn {
+    println!("Found a converted INT16 (Int)");
     match *db_col_type {
         PgType::INT2 => &|f: &Field| -> Box<dyn ToSql + Sync> {
             match f {
-                Field::Short(v) => Box::new((*v as i16)) as Box<dyn ToSql + Sync>,
+                Field::Short(v) => Box::new(*v) as Box<dyn ToSql + Sync>,
                 _ => Box::new(NullVal) as Box<dyn ToSql + Sync>,
             }
         },
@@ -101,10 +195,7 @@ fn p_int32_c_int_16<'a>(
     }
 }
 
-fn p_int32_c_date<'a>(
-    _converted: &'a ConvertedType,
-    db_col_type: &PgType,
-) -> &'a dyn Fn(&Field) -> Box<dyn ToSql + Sync> {
+fn field_is_date<'a>(_converted: &'a ConvertedType, db_col_type: &PgType) -> &'a ConverterFn {
     println!("Found a converted DATE");
     match *db_col_type {
         PgType::DATE => &|f: &Field| -> Box<dyn ToSql + Sync> {
@@ -113,7 +204,7 @@ fn p_int32_c_date<'a>(
                 _ => Box::new(NullVal) as Box<dyn ToSql + Sync>,
             }
         },
-        PgType::VARCHAR | PgType::TEXT | PgType::CHAR => &|f: &Field| -> Box<dyn ToSql + Sync> {
+        PgType::VARCHAR | PgType::TEXT | PgType::BPCHAR => &|f: &Field| -> Box<dyn ToSql + Sync> {
             match f {
                 Field::Date(v) => {
                     let date_fmt = "%Y-%m-%d";
@@ -124,6 +215,7 @@ fn p_int32_c_date<'a>(
             }
         },
         _ => {
+            error!("NOT YET IMPLEMENTED for PG type {:?}", db_col_type);
             todo!()
         }
     }
@@ -132,18 +224,21 @@ fn p_int32_c_date<'a>(
 pub fn build<'a>(
     pq_type_data: &'a [(PqType, ConvertedType)],
     db_col_types: &'a [PgType],
-) -> Result<Vec<&'a dyn Fn(&Field) -> Box<dyn ToSql + Sync>>> {
-    let mut converters: Vec<&dyn Fn(&Field) -> Box<dyn ToSql + Sync>> =
-        Vec::with_capacity(db_col_types.len());
+) -> Result<Vec<&'a ConverterFn>> {
+    let mut converters: Converters = Vec::with_capacity(db_col_types.len());
+
     for (i, (physical, converted)) in pq_type_data.iter().enumerate() {
         let db_col_type = db_col_types[i].clone();
+
         println!(
             "{}: P:{:?}, C:{:?}, pg:{:?}",
             i, physical, converted, db_col_types[i]
         );
-        let converter_fn: &dyn Fn(&Field) -> Box<dyn ToSql + Sync> = match physical {
+
+        let converter_fn: &ConverterFn = match physical {
             // TODO: add arms for physical -> converted -> db_col_type
-            PqType::INT32 => p_int32(&converted, &db_col_type),
+            PqType::INT32 => p_int32(converted, &db_col_type),
+            PqType::BYTE_ARRAY => p_byte_array(converted, &db_col_type),
             _ => {
                 // Just return v as Box, for all those mappings between parquet->rust->pg
                 // that I don't need to implement right now.

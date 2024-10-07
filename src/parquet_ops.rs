@@ -1,10 +1,12 @@
 use anyhow::{anyhow, Result};
-use parquet::basic::ConvertedType;
+use parquet::basic::{ConvertedType, Type as PqType};
 use parquet::file::reader::{FileReader, SerializedFileReader};
 use parquet::schema::types::Type;
 use std::collections::HashMap;
 use std::fs::File;
 use std::path::Path;
+
+pub type PqTypeData = (PqType, ConvertedType);
 
 pub struct Parquet {
     pub filename: String,
@@ -29,12 +31,11 @@ impl Parquet {
     pub fn get_desired_cols(
         &mut self,
         reader: &SerializedFileReader<File>,
-    ) -> Result<(Vec<usize>, Vec<(parquet::basic::Type, ConvertedType)>)> {
+    ) -> Result<(Vec<usize>, Vec<PqTypeData>)> {
         let schema: &Type = reader.metadata().file_metadata().schema();
 
         let mut desired_cols: Vec<usize> = Vec::with_capacity(self.desired_fields.len());
-        let mut pq_type_data: Vec<(parquet::basic::Type, ConvertedType)> =
-            Vec::with_capacity(self.desired_fields.len());
+        let mut pq_type_data: Vec<PqTypeData> = Vec::with_capacity(self.desired_fields.len());
 
         let field_map: &mut HashMap<String, (usize, parquet::basic::Type, ConvertedType)> =
             &mut HashMap::new();

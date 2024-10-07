@@ -20,7 +20,6 @@ pub mod tests {
     use parquet::file::reader::SerializedFileReader;
     use std::collections::HashMap;
     use std::env;
-    use std::fmt::Write;
     use std::fs::File;
     use std::io::Cursor;
     use std::path::Path;
@@ -105,7 +104,7 @@ pub mod tests {
     "#;
 
     pub const TYPES_FULL_COLS_FOR_CREATE: &str = r#"
-                my_date_field DATE,
+                my_date_field CHAR(10),
                 my_boolean BOOLEAN,
                 my_timestamp_field TIMESTAMP,
                 my_varchar_field VARCHAR (255),
@@ -432,6 +431,7 @@ pub mod tests {
     }
 
     // Setup function that runs once before all tests
+    #[allow(dead_code)]
     pub fn setup_docker() {
         static DOCKER_SETUP: Lazy<()> = Lazy::new(|| {
             if !docker_exists() {

@@ -1,3 +1,7 @@
+Maybe create vec of funcs that operate on the RowAccessor to retrieve the value type
+We should be able to figure out based on Physical and Converted what the rust val should be
+e.g. if physical is f64
+
 * handle timestamps, dates, bools, smallints etc
     * check with generated parquet if can feed types in or not.
         * in a test, create table with types we'd like it to handle
