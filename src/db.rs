@@ -84,6 +84,7 @@ impl Db {
         table_name: &str,
         parquet_fields: Vec<String>,
         parquet_to_db: Option<HashMap<String, Option<String>>>,
+        schema_name: Option<String>,
     ) -> Result<Self> {
         use tokio_postgres::{connect, NoTls};
 
@@ -100,6 +101,13 @@ impl Db {
         // query db table to get types for each column
         let db_col_to_type: HashMap<String, PgType> = db_col_to_type(&client, table_name).await?;
         debug!("db_col_to_type: {:?}", db_col_to_type);
+
+        // use schema if needed
+        if let Some(s) = schema_name {
+            debug!("will use schema {}", s.clone());
+            let sql = format!("SET search_path TO {}", s);
+            client.execute(&sql, &[]).await?;
+        };
 
         // parquet_to_db: HashMap of parquet field name to the destination db col.
         // It's useful when the db col name differs from the parquet field name.
@@ -184,10 +192,12 @@ impl Db {
             // then iter.next returns let (field, col_type) and we can encode accordingly
             let (mut row_data, type_data) = create_row_data(&desired_fields);
 
-            debug!("SELECTED ROW DATA: {:?}", &row_data);
-            debug!("RUST DATA TYPES: {:?}", &type_data);
+            // debug!("SELECTED ROW DATA: {:?}", &row_data);
+            // debug!("RUST DATA TYPES: {:?}", &type_data);
             match writer.as_mut().write(&row_data).await {
-                Ok(_) => debug!("row written to db"),
+                Ok(_) => {
+                    // debug!("row written to db")
+                }
                 Err(e) => {
                     let msg = format!(
                         "\
@@ -367,6 +377,7 @@ mod tests {
             table_name,
             vec_stringify!["model", "gear"],
             None,
+            None,
         )
         .await;
 
@@ -393,6 +404,7 @@ mod tests {
             table_name,
             vec_stringify!["model", "gear"],
             None,
+            None,
         )
         .await;
 
@@ -417,6 +429,7 @@ mod tests {
             "not_a_real_table",
             vec_stringify!["model", "gear"],
             None,
+            None,
         )
         .await;
 
@@ -437,6 +450,7 @@ mod tests {
             GOOD_DB_CONN_STR,
             table_name,
             vec_stringify!["model", "gear", "not_a_col"],
+            None,
             None,
         )
         .await;
@@ -463,6 +477,7 @@ mod tests {
             table_name,
             vec_stringify!["i.model", "num_of_gears"], // desired cols from parquet
             Some(aliases),                             // map of parquet col names to db table cols
+            None,
         )
         .await;
 
@@ -495,6 +510,7 @@ mod tests {
             table_name,
             vec_stringify!["model", "num_of_gears"], // desired cols from parquet
             Some(aliases),                           // map of parquet col names to db table cols
+            None,
         )
         .await;
 
@@ -529,6 +545,7 @@ mod tests {
             table_name,
             vec_stringify!["model", "num_of_gears"], // desired cols from parquet
             Some(aliases),                           // map of parquet col names to db table cols
+            None,
         )
         .await;
 
@@ -556,6 +573,7 @@ mod tests {
             table_name,
             vec_stringify!["model", "num_of_gears"],
             Some(aliases),
+            None,
         )
         .await;
 

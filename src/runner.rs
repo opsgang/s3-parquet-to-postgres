@@ -58,6 +58,7 @@ pub async fn run(cfg_file: &str) -> Result<()> {
     let desired_fields: Vec<String> = cfg.parquet.desired_fields;
 
     // db
+    let schema_name = cfg.db.schema_name;
     let table_name: String = cfg.db.table_name;
     let conn_str: &str = cfg.db.conn_str.as_str();
 
@@ -68,6 +69,7 @@ pub async fn run(cfg_file: &str) -> Result<()> {
         table_name.as_str(),
         desired_fields.clone(),
         parquet_to_db,
+        schema_name,
     )
     .await?;
 

@@ -9,3 +9,5 @@
 * ci/cd
     * pr build runs cargo test -- --nocapture
     * release build packages binary
+
+RUNNING on 10.0.5.4

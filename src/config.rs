@@ -15,6 +15,7 @@ pub struct Config {
 
 #[derive(Debug, Deserialize)]
 pub struct DbConfig {
+    pub schema_name: Option<String>,
     pub table_name: String,
     pub conn_str: String,
 }
